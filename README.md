@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![Pull Request Watcher Banner](icon-banner.png)
+<img src="icon-banner.png" alt="Pull Request Watcher Banner" width="200"/>
 
 A Chrome extension for tracking and managing Bitbucket pull request reviews with optimized performance.
 
@@ -206,6 +206,10 @@ If you'd like to contribute or modify the extension:
 - Write clean, maintainable code
 - Test with various Bitbucket PR layouts
 - Consider performance implications of new features
+
+## License
+
+[MIT License](LICENSE)
 
 ## Acknowledgements
 
