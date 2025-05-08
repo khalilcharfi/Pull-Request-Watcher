@@ -10,29 +10,61 @@ document.addEventListener('DOMContentLoaded', () => {
   // Safe wrapper for browser API calls
   const safeSendMessage = (message, callback) => {
     try {
-      const sendPromise = browserAPI.runtime.sendMessage(message);
-      if (sendPromise && typeof sendPromise.then === 'function') {
-        // Handle promise-based API (Firefox)
-        sendPromise
+      // Add an error handler to catch potential connection issues
+      const handleError = (err) => {
+        console.error("Error sending message:", err);
+        if (callback && typeof callback === 'function') {
+          callback({ success: false, error: err.message || "Failed to connect" });
+        }
+      };
+
+      if (typeof browser !== 'undefined' && browser.runtime) {
+        // Firefox uses promises
+        browser.runtime.sendMessage(message)
           .then(response => {
             if (callback && typeof callback === 'function') {
               callback(response);
             }
           })
-          .catch(err => {
-            console.log("Error sending message:", err);
-            if (callback && typeof callback === 'function') {
-              callback({ success: false, error: err.message });
-            }
-          });
+          .catch(handleError);
       } else {
-        // Handle callback-based API (Chrome)
-        // Chrome already uses the callback pattern
+        // Chrome uses callbacks
+        chrome.runtime.sendMessage(message, (response) => {
+          // Check for runtime error
+          const lastError = chrome.runtime.lastError;
+          if (lastError) {
+            handleError(lastError);
+          } else if (callback && typeof callback === 'function') {
+            callback(response);
+          }
+        });
       }
     } catch (err) {
-      console.log("Error sending message:", err);
+      console.error("Exception sending message:", err);
       if (callback && typeof callback === 'function') {
         callback({ success: false, error: err.message });
+      }
+      
+      // Add a fallback to trigger the loading to end in case of connection failure
+      const overlay = document.getElementById('loading-overlay');
+      if (overlay && !overlay.classList.contains('hidden')) {
+        setTimeout(() => {
+          state.loading = false;
+          hideLoadingOverlay();
+          
+          // Show error message in the list
+          const prList = document.getElementById('pr-list');
+          if (prList) {
+            prList.innerHTML = `
+              <div class="empty-state">
+                ${ICONS.no_data}
+                <p>Connection error</p>
+                <p class="empty-subtitle">Could not connect to extension background service</p>
+                <p class="empty-subtitle">Try refreshing the popup</p>
+              </div>
+            `;
+          }
+        }, 3000);
       }
     }
   };
@@ -596,47 +628,87 @@ document.addEventListener('DOMContentLoaded', () => {
   
   // Function to load PR stats from storage
   function loadPRStats(callback) {
+    let messageTimeout = setTimeout(() => {
+      console.warn("loadPRStats timed out after 5 seconds");
+      state.loading = false;
+      hideLoadingOverlay();
+      renderPRList({ prs: [] });
+      
+      // Show error message
+      const prList = document.getElementById('pr-list');
+      if (prList) {
+        prList.innerHTML = `
+          <div class="empty-state">
+            ${ICONS.no_data}
+            <p>Connection timed out</p>
+            <p class="empty-subtitle">Please try again</p>
+          </div>
+        `;
+      }
+      
+      if (typeof callback === 'function') {
+        callback();
+      }
+    }, 5000);
+    
+    // Clean up undefined PRs first (defensive coding)
     safeSendMessage({
       action: "removePR",
       prId: "undefined"
     }, () => {
       // Get all PR stats from storage
       safeSendMessage({ action: "getAllPRStats" }, response => {
-        if (response && response.success) {
-          // Transform data structure for easier rendering
-          const prArray = Object.keys(response.prs || {}).map(key => {
-            const pr = response.prs[key];
-            return {
-              ...pr,
-              id: key,
-              prNumber: pr.prNumber || key.replace('pr-', '')
-            };
-          });
-          
-          // Update state
-          state.prs = prArray;
-          state.loading = false;
-          
-          // Render the PR list
-          renderFilteredPRs();
-          
-          // Hide loading overlay
-          hideLoadingOverlay();
-          
-          // Execute callback if provided
-          if (typeof callback === 'function') {
-            callback();
+        clearTimeout(messageTimeout);
+        
+        if (response && response.success && response.prs) {
+          try {
+            // Transform data structure for easier rendering
+            const prArray = Object.keys(response.prs || {}).map(key => {
+              const pr = response.prs[key];
+              if (!pr) return null;
+              
+              return {
+                ...pr,
+                id: key,
+                prNumber: pr.prNumber || key.replace('pr-', '')
+              };
+            }).filter(Boolean); // Remove null entries
+            
+            // Update state
+            state.prs = prArray;
+            state.loading = false;
+            
+            // Render the PR list
+            renderFilteredPRs();
+            
+            // Hide loading overlay
+            hideLoadingOverlay();
+            
+            // Execute callback if provided
+            if (typeof callback === 'function') {
+              callback();
+            }
+          } catch (err) {
+            console.error("Error processing PR data:", err);
+            handleLoadError();
           }
         } else {
-          state.loading = false;
-          hideLoadingOverlay();
-          renderPRList({ prs: [] });
-          if (typeof callback === 'function') {
-            callback();
-          }
+          console.warn("No PRs found or invalid response:", response);
+          handleLoadError();
         }
       });
     });
+    
+    function handleLoadError() {
+      state.loading = false;
+      hideLoadingOverlay();
+      state.prs = [];
+      renderPRList({ prs: [] });
+      
+      if (typeof callback === 'function') {
+        callback();
+      }
+    }
   }
   
   // Initialize app on DOMContentLoaded
