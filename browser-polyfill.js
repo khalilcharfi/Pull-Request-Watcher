@@ -5,9 +5,12 @@
 
 (function() {
   // Check if we're in a browser extension context
+  // Use self instead of window for service worker compatibility
+  const globalScope = typeof self !== 'undefined' ? self : (typeof window !== 'undefined' ? window : this);
+  
   if (typeof browser === 'undefined' && typeof chrome !== 'undefined') {
     // We're in Chrome, create a browser namespace that maps to chrome
-    window.browser = {
+    globalScope.browser = {
       // Storage
       storage: {
         local: {
@@ -63,6 +66,18 @@
         update: function(tabId, updateProperties, callback) {
           return chrome.tabs.update(tabId, updateProperties, callback);
         }
+      },
+      
+      // Add alarms API which is used in background-wrapper.js
+      alarms: {
+        create: function(name, alarmInfo) {
+          return chrome.alarms.create(name, alarmInfo);
+        },
+        onAlarm: {
+          addListener: function(callback) {
+            return chrome.alarms.onAlarm.addListener(callback);
+          }
+        }
       }
     };
   } else if (typeof browser !== 'undefined') {
@@ -114,5 +129,20 @@
       }
       return originalRemove(keys);
     };
+    
+    // Ensure alarms API is available in Firefox
+    if (!browser.alarms) {
+      browser.alarms = {
+        create: function(name, alarmInfo) {
+          // Fallback implementation if needed
+          console.warn("browser.alarms.create not implemented in this browser");
+        },
+        onAlarm: {
+          addListener: function(callback) {
+            console.warn("browser.alarms.onAlarm not implemented in this browser");
+          }
+        }
+      };
+    }
   }
 })(); 
