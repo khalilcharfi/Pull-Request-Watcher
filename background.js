@@ -1,19 +1,32 @@
 // Background script for handling communication between content script and popup
 
-// Browser compatibility check - ensure 'browser' is available or fall back to 'chrome'
-const getBrowserAPI = () => {
-  return typeof browser !== 'undefined' ? browser : chrome;
-};
+// Get browser API reference - in service worker context, use chrome directly
+const browserAPI = chrome;
 
-// Get browser API reference
-const browserAPI = getBrowserAPI();
+// Skip the onInstalled event to prevent immediate execution which might fail
+// and instead perform initialization when needed
+let isInitialized = false;
 
-browserAPI.runtime.onInstalled.addListener(() => {
-  // Clean up potential duplicate entries on extension update/install
-  cleanupDuplicatePRs();
-  // Clean up any PRs with unknown project or repo
-  cleanupUnknownPRs();
-});
+// Function to initialize the background script
+function initializeBackgroundScript() {
+  if (isInitialized) return;
+  
+  console.log("Initializing background script...");
+  try {
+    // Clean up potential duplicate entries
+    cleanupDuplicatePRs();
+    // Clean up any PRs with unknown project or repo
+    cleanupUnknownPRs();
+    
+    isInitialized = true;
+    console.log("Background script initialized successfully");
+  } catch (err) {
+    console.error("Error initializing background script:", err);
+  }
+}
+
+// Initialize after a short delay to ensure the service worker is ready
+setTimeout(initializeBackgroundScript, 1000);
 
 // Clean up PRs with unknown project or repo
 function isProjectOrRepoUnknown(prInfo) {

@@ -1,17 +1,42 @@
 // Background wrapper for Manifest V3
-// This imports the browser polyfill first, then the main background script
+// Create a simpler polyfill for service worker context
+
 try {
   console.log("Background wrapper initializing...");
-  importScripts('browser-polyfill.js');
-  console.log("Browser polyfill loaded");
+  
+  // Create a simplified browser compatibility layer for service workers
+  // that doesn't rely on the window object
+  if (typeof browser === 'undefined') {
+    self.browser = {
+      runtime: {
+        sendMessage: chrome.runtime.sendMessage,
+        onMessage: chrome.runtime.onMessage,
+        getManifest: chrome.runtime.getManifest,
+        getURL: chrome.runtime.getURL
+      },
+      storage: {
+        local: chrome.storage.local
+      },
+      tabs: {
+        query: chrome.tabs.query,
+        sendMessage: chrome.tabs.sendMessage,
+        create: chrome.tabs.create
+      },
+      alarms: {
+        create: chrome.alarms.create,
+        onAlarm: chrome.alarms.onAlarm
+      }
+    };
+    
+    console.log("Created service worker compatible browser API abstraction");
+  }
+  
+  // Now load the background script
   importScripts('background.js');
   console.log("Background script loaded");
   
-  // Add a simple ping handler to test connectivity
-  const browserAPI = typeof browser !== 'undefined' ? browser : chrome;
-  
   // Direct ping handler for faster response
-  browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  self.chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.action === "ping") {
       console.log("Ping received in background wrapper");
       sendResponse({ success: true, message: "Background script is running!" });
@@ -20,10 +45,10 @@ try {
   });
   
   // Keep service worker alive with an alarm
-  browserAPI.alarms.create('keepAlive', { periodInMinutes: 1 });
+  chrome.alarms.create('keepAlive', { periodInMinutes: 1 });
   
   // Handle the keep-alive alarm
-  browserAPI.alarms.onAlarm.addListener((alarm) => {
+  chrome.alarms.onAlarm.addListener((alarm) => {
     if (alarm.name === 'keepAlive') {
       console.log("Background service worker kept alive");
       
@@ -34,7 +59,7 @@ try {
   
   // Create a special cached version of PR data for faster popup loading
   function refreshDataCache() {
-    browserAPI.storage.local.get(null, (result) => {
+    chrome.storage.local.get(null, (result) => {
       // Process all PR info entries to create a cache
       const prs = {};
       
@@ -55,7 +80,7 @@ try {
       });
       
       // Store the processed data in a cache
-      browserAPI.storage.local.set({ 
+      chrome.storage.local.set({ 
         'pr_data_cache': {
           timestamp: Date.now(),
           data: prs
