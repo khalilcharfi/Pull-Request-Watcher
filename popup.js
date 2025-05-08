@@ -1,4 +1,53 @@
 document.addEventListener('DOMContentLoaded', () => {
+  // Browser compatibility check - ensure 'browser' is available or fall back to 'chrome'
+  const getBrowserAPI = () => {
+    return typeof browser !== 'undefined' ? browser : chrome;
+  };
+  
+  // Get browser API reference
+  const browserAPI = getBrowserAPI();
+
+  // Safe wrapper for browser API calls
+  const safeSendMessage = (message, callback) => {
+    try {
+      const sendPromise = browserAPI.runtime.sendMessage(message);
+      if (sendPromise && typeof sendPromise.then === 'function') {
+        // Handle promise-based API (Firefox)
+        sendPromise
+          .then(response => {
+            if (callback && typeof callback === 'function') {
+              callback(response);
+            }
+          })
+          .catch(err => {
+            console.log("Error sending message:", err);
+            if (callback && typeof callback === 'function') {
+              callback({ success: false, error: err.message });
+            }
+          });
+      } else {
+        // Handle callback-based API (Chrome)
+        // Chrome already uses the callback pattern
+      }
+    } catch (err) {
+      console.log("Error sending message:", err);
+      if (callback && typeof callback === 'function') {
+        callback({ success: false, error: err.message });
+      }
+    }
+  };
+  
+  // Safe wrapper for creating tabs
+  const safeCreateTab = (options) => {
+    try {
+      browserAPI.tabs.create(options).catch(err => {
+        console.log("Error creating tab:", err);
+      });
+    } catch (err) {
+      console.log("Error creating tab:", err);
+    }
+  };
+
   const prListElement = document.getElementById('pr-list');
   
   // Define optimized SVG icons with consistent sizing
@@ -174,7 +223,7 @@ document.addEventListener('DOMContentLoaded', () => {
       showLoadingOverlay('Refreshing PRs...');
       
       // Request a cleanup of unknown PR entries
-      chrome.runtime.sendMessage({ action: "cleanupUnknown" }, () => {
+      safeSendMessage({ action: "cleanupUnknown" }, () => {
         state.loading = true;
         
         loadPRStats(() => {
@@ -248,334 +297,348 @@ document.addEventListener('DOMContentLoaded', () => {
           // Show loading overlay
           showLoadingOverlay('Removing PR...');
           
-          chrome.runtime.sendMessage({ 
-            action: "removePR", 
-            prId 
+          // Remove PR from storage
+          safeSendMessage({
+            action: "removePR",
+            prId: prId
           }, () => {
-            // Show status indicator
-            const statusIndicator = document.getElementById('status-indicator');
-            statusIndicator.textContent = 'PR removed';
-            statusIndicator.classList.remove('hidden');
+            // Remove item from UI
+            const prItemToRemove = document.querySelector(`.pr-item[data-pr-id="${prId}"]`);
+            if (prItemToRemove) prItemToRemove.remove();
             
-            loadPRStats(() => {
-              hideLoadingOverlay();
-              
-              setTimeout(() => {
-                statusIndicator.classList.add('hidden');
-              }, 1500);
-            });
+            // Update the PR count in the UI
+            state.prs = state.prs.filter(pr => pr.id !== prId);
+            renderFilteredPRs();
+            
+            // Hide the overlay
+            hideLoadingOverlay();
           });
         }
       });
-    } else if (prItem && !removeBtn) {
-      // Handle PR item click - open PR
+      return;
+    }
+    
+    if (prItem) {
+      // Handle PR item click (open PR)
       const url = prItem.dataset.url;
       if (url) {
-        // Apply visual feedback
-        prItem.classList.add('pr-clicked');
-        setTimeout(() => {
-          chrome.tabs.create({ url });
-        }, 150);
+        safeCreateTab({ url });
       }
     }
   }
   
-  // Show confirmation dialog
+  // Show a confirmation dialog
   function showConfirmDialog({ message, onConfirm }) {
-    const confirmDialog = document.createElement('div');
-    confirmDialog.className = 'confirm-dialog';
-    confirmDialog.innerHTML = `
-      <div class="confirm-dialog-content">
-        <p>${message}</p>
-        <div class="confirm-buttons">
-          <button class="btn btn-cancel">Cancel</button>
-          <button class="btn btn-confirm">Remove</button>
-        </div>
+    const overlay = document.createElement('div');
+    overlay.className = 'dialog-overlay';
+    
+    const dialog = document.createElement('div');
+    dialog.className = 'confirm-dialog';
+    dialog.innerHTML = `
+      <p>${message}</p>
+      <div class="dialog-buttons">
+        <button class="cancel-btn">Cancel</button>
+        <button class="confirm-btn">Remove</button>
       </div>
     `;
     
-    document.body.appendChild(confirmDialog);
+    // Add to DOM
+    overlay.appendChild(dialog);
+    document.body.appendChild(overlay);
     
-    // Add event listeners to dialog buttons
-    confirmDialog.querySelector('.btn-cancel').addEventListener('click', () => {
-      document.body.removeChild(confirmDialog);
+    // Setup event handlers
+    const cancelBtn = dialog.querySelector('.cancel-btn');
+    const confirmBtn = dialog.querySelector('.confirm-btn');
+    
+    cancelBtn.addEventListener('click', () => {
+      document.body.removeChild(overlay);
     });
     
-    confirmDialog.querySelector('.btn-confirm').addEventListener('click', () => {
-      document.body.removeChild(confirmDialog);
+    confirmBtn.addEventListener('click', () => {
       onConfirm();
+      document.body.removeChild(overlay);
     });
   }
-  
-  // Create filter function based on current state
+
+  // Filter PRs based on current filter settings
   function filterPRs(prs) {
     return prs.filter(pr => {
-      // Text search
-      const searchText = state.filter.text;
-      const matchesSearch = !searchText || 
-        pr.info?.title?.toLowerCase().includes(searchText) ||
-        pr.info?.project?.toLowerCase().includes(searchText) ||
-        pr.info?.repo?.toLowerCase().includes(searchText) ||
-        pr.prNumber?.toLowerCase().includes(searchText);
+      // Apply text search filter
+      const textMatch = state.filter.text === '' || 
+        pr.title?.toLowerCase().includes(state.filter.text) ||
+        pr.project?.toLowerCase().includes(state.filter.text) ||
+        pr.repo?.toLowerCase().includes(state.filter.text) ||
+        pr.prNumber?.toString().toLowerCase().includes(state.filter.text);
       
-      // Approval status
-      const isApproved = pr.info?.isApprovedByMe === true;
-      const matchesApproval = (isApproved && state.filter.showApproved) || 
-                             (!isApproved && state.filter.showPending);
+      // Apply approval filter
+      const approvalMatch = 
+        (pr.isApprovedByMe && state.filter.showApproved) ||
+        (!pr.isApprovedByMe && state.filter.showPending);
       
-      return matchesSearch && matchesApproval;
+      return textMatch && approvalMatch;
     });
   }
   
-  // Render filtered PRs based on current state
+  // Render PRs based on current filter state
   function renderFilteredPRs() {
     const filteredPRs = filterPRs(state.prs);
     renderPRList({ prs: filteredPRs });
     
-    // Update the PR count in the stats bar
+    // Update PR count
     const prCountEl = document.getElementById('pr-count');
     if (prCountEl) {
-      prCountEl.textContent = `${filteredPRs.length} PR${filteredPRs.length !== 1 ? 's' : ''}`;
+      prCountEl.textContent = filteredPRs.length > 0 
+        ? `Showing ${filteredPRs.length} of ${state.prs.length} PRs`
+        : `No PRs match your filters`;
     }
   }
   
-  // Optimized PR list rendering with loading states
+  // Render list of PRs
   function renderPRList({ prs }) {
-    // Toggle filter controls based on whether there are ANY stored PRs, not just filtered ones
-    toggleFilterControls(state.prs && state.prs.length > 0);
+    if (!prListElement) return;
     
-    // Early return for empty data
+    prListElement.innerHTML = '';
+    
     if (!prs || prs.length === 0) {
-      // Check if we have PRs but no search results
-      if (state.prs && state.prs.length > 0 && (state.filter.text || !state.filter.showApproved || !state.filter.showPending)) {
-        prListElement.innerHTML = `
-          <div class="empty-state">
-            ${ICONS.search}
-            <p>No matching PRs found</p>
-            <p class="empty-state-hint">Try adjusting your search or filters</p>
-          </div>
-        `;
-      } else {
-        prListElement.innerHTML = `
-          <div class="empty-state">
-            ${ICONS.no_data}
-            <p>No PR reviews tracked yet</p>
-            <p class="empty-state-hint">Visit a Bitbucket PR to start tracking</p>
-          </div>
-        `;
-      }
+      const emptyState = document.createElement('div');
+      emptyState.className = 'empty-state';
+      emptyState.innerHTML = `
+        ${ICONS.no_data}
+        <p>No pull requests to display</p>
+        <p class="empty-subtitle">Review a PR on Bitbucket to start tracking</p>
+      `;
+      prListElement.appendChild(emptyState);
       return;
     }
     
-    // Build HTML for each PR item
-    let html = '<ul class="pr-items" tabindex="0" role="list">';
-    prs.forEach((pr, index) => {
-      // Skip if missing critical info
-      if (!pr || !pr.info) return;
-      
-      const isApproved = pr.info.isApprovedByMe === true;
-      const approvedClass = isApproved ? 'approved-by-me' : '';
-      
-      // Format PR status badge
-      let statusBadge = '';
-      if (pr.info.status) {
-        const status = pr.info.status.toLowerCase();
-        let badgeClass = '';
-        let text = '';
-        
-        switch (status) {
-          case 'open':
-            badgeClass = 'open';
-            text = 'Open';
-            break;
-          case 'approved':
-          case 'merged':
-            badgeClass = 'merged';
-            text = 'Merged';
-            break;
-          case 'declined':
-            badgeClass = 'declined';
-            text = 'Declined';
-            break;
-          default:
-            badgeClass = '';
-            text = status;
-        }
-        
-        statusBadge = `
-          <div class="pr-badge ${badgeClass}">
-            ${text}
-          </div>
-        `;
+    // Enable filter controls when we have data
+    toggleFilterControls(true);
+    
+    // Sort PRs: First by approval status (pending first), then by last visited (recent first)
+    const sortedPRs = [...prs].sort((a, b) => {
+      // First sort by status: merged/declined last
+      if ((a.status === 'merged' || a.status === 'declined') && 
+          (b.status !== 'merged' && b.status !== 'declined')) {
+        return 1;
+      }
+      if ((b.status === 'merged' || b.status === 'declined') && 
+          (a.status !== 'merged' && a.status !== 'declined')) {
+        return -1;
       }
       
-      // Create approved badge if needed
-      const approvedBadge = isApproved ? `
-        <div class="pr-badge approved">
-          ${ICONS.check_circle} Approved
-        </div>
-      ` : '';
+      // Then sort pending before approved
+      if (!a.isApprovedByMe && b.isApprovedByMe) return -1;
+      if (a.isApprovedByMe && !b.isApprovedByMe) return 1;
       
-      // Format project/repo info
-      const repoInfo = pr.info.repo ? `
-        <div class="pr-meta">
-          ${ICONS.folder}
-          <span>${pr.info.repo}</span>
-        </div>
-      ` : '';
-      
-      // Format date
-      let dateInfo = '';
-      if (pr.info.lastVisited) {
-        const date = new Date(pr.info.lastVisited);
-        const formattedDate = date.toLocaleDateString(undefined, {
-          month: 'short',
-          day: 'numeric'
-        });
-        
-        dateInfo = `
-          <div class="pr-meta">
-            ${ICONS.calendar}
-            <span>Visited ${formattedDate}</span>
-          </div>
-        `;
-      }
-      
-      // Build the stats section
-      const views = pr.info.viewCount || 0;
-      const approvals = pr.info.totalApprovals || 0;
-      const comments = pr.info.commentCount || 0;
-      
-      // Build the complete PR item with improved keyboard accessibility
-      html += `
-        <li class="pr-item ${approvedClass}" data-pr-id="${pr.prId}" data-url="${pr.info.url || '#'}" tabindex="0" role="button" aria-label="PR ${pr.prNumber}: ${pr.info.title || 'PR #' + pr.prNumber}">
-          <div class="pr-content">
-            <div class="pr-header">
-              <div class="pr-title">${pr.info.title || 'PR #' + pr.prNumber}</div>
-              <button class="remove-btn" data-pr-id="${pr.prId}" title="Remove from tracking" aria-label="Remove PR">
-                ${ICONS.close}
-              </button>
-            </div>
-            <div class="pr-meta-container">
-              ${repoInfo}
-              ${dateInfo}
-              ${approvedBadge}
-              ${statusBadge}
-            </div>
-            <div class="pr-stats">
-              <div class="stat" title="Views">
-                ${ICONS.visibility}
-                <span class="stat-value">${views}</span>
-              </div>
-              <div class="stat" title="Approvals">
-                ${ICONS.thumb_up}
-                <span class="stat-value">${approvals}</span>
-              </div>
-              <div class="stat" title="Comments">
-                ${ICONS.tab}
-                <span class="stat-value">${comments}</span>
-              </div>
-            </div>
-          </div>
-        </li>
-      `;
+      // Then by last visit time (most recent first)
+      return (b.lastVisited || 0) - (a.lastVisited || 0);
     });
     
-    html += '</ul>';
+    // Create PR items
+    sortedPRs.forEach(pr => {
+      // Skip empty or invalid PRs
+      if (!pr || !pr.title) return;
+      
+      const prItem = document.createElement('div');
+      prItem.className = `pr-item ${pr.status || 'open'} ${pr.isApprovedByMe ? 'approved' : 'pending'}`;
+      prItem.dataset.prId = pr.id;
+      prItem.dataset.url = pr.url;
+      
+      // Handle project truncation for long names
+      let displayProject = pr.displayProject || pr.project || 'Unknown';
+      let displayRepo = pr.displayRepo || pr.repo || 'Unknown';
+      
+      // Truncate long display names
+      if (displayProject.length > 20) {
+        displayProject = displayProject.substring(0, 18) + '...';
+      }
+      if (displayRepo.length > 20) {
+        displayRepo = displayRepo.substring(0, 18) + '...';
+      }
+      
+      // Format time string
+      const timeAgo = getTimeAgo(pr.lastVisited);
+      
+      // Build HTML with optimized rendering
+      prItem.innerHTML = `
+        <div class="pr-info">
+          <div class="pr-title" title="${pr.title || 'Untitled PR'}">${pr.title || 'Untitled PR'}</div>
+          <div class="pr-project" title="${pr.project || 'Unknown'}/${pr.repo || 'Unknown'}">
+            ${ICONS.folder} ${displayProject}/${displayRepo}
+          </div>
+          <div class="pr-meta">
+            <span class="pr-number" title="PR #${pr.prNumber}">
+              #${pr.prNumber}
+            </span>
+            ${pr.status !== 'open' ? `<span class="pr-status ${pr.status}">${pr.status}</span>` : ''}
+            <span class="pr-time" title="Last visited: ${new Date(pr.lastVisited).toLocaleString()}">
+              ${ICONS.calendar} ${timeAgo}
+            </span>
+          </div>
+        </div>
+        <div class="pr-stats">
+          <div class="stat ${pr.viewCount > 0 ? 'has-value' : ''}" title="Views">
+            ${ICONS.visibility}
+            <span>${pr.viewCount || 0}</span>
+          </div>
+          <div class="stat ${pr.approvalCount > 0 ? 'has-value' : ''}" title="Approved">
+            ${ICONS.thumb_up}
+            <span>${pr.approvalCount || 0}</span>
+          </div>
+          <button class="remove-btn" data-pr-id="${pr.id}" title="Remove from history">${ICONS.close}</button>
+        </div>
+      `;
+      
+      prListElement.appendChild(prItem);
+    });
     
-    // Update the PR list content
-    prListElement.innerHTML = html;
-    
-    // Add keyboard navigation
+    // Setup keyboard navigation
     setupKeyboardNavigation();
   }
   
-  // Add keyboard navigation support
+  // Get formatted time ago string
+  function getTimeAgo(timestamp) {
+    if (!timestamp) return 'Never';
+    
+    const now = Date.now();
+    const diff = now - timestamp;
+    
+    // Less than a minute
+    if (diff < 60000) {
+      return 'Just now';
+    }
+    
+    // Less than an hour
+    if (diff < 3600000) {
+      const minutes = Math.floor(diff / 60000);
+      return `${minutes}m ago`;
+    }
+    
+    // Less than a day
+    if (diff < 86400000) {
+      const hours = Math.floor(diff / 3600000);
+      return `${hours}h ago`;
+    }
+    
+    // Less than a week
+    if (diff < 604800000) {
+      const days = Math.floor(diff / 86400000);
+      return `${days}d ago`;
+    }
+    
+    // Format as date
+    const date = new Date(timestamp);
+    return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  }
+  
+  // Setup keyboard navigation
   function setupKeyboardNavigation() {
     const prItems = document.querySelectorAll('.pr-item');
+    if (prItems.length === 0) return;
     
-    prItems.forEach(item => {
-      item.addEventListener('keydown', (e) => {
-        // Enter or Space to open PR
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          const url = item.dataset.url;
-          if (url) {
-            item.classList.add('pr-clicked');
-            setTimeout(() => {
-              chrome.tabs.create({ url });
-            }, 150);
+    // Initial focus setup
+    let focusedIndex = -1;
+    
+    // Setup key handler
+    document.addEventListener('keydown', (e) => {
+      // Skip if we're in an input field
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+        return;
+      }
+      
+      // Get fresh PR items list
+      const updatedPrItems = document.querySelectorAll('.pr-item');
+      if (updatedPrItems.length === 0) return;
+      
+      // Refresh selections
+      const currentFocused = document.querySelector('.pr-item:focus');
+      if (currentFocused) {
+        Array.from(updatedPrItems).forEach((item, i) => {
+          if (item === currentFocused) {
+            focusedIndex = i;
           }
-        }
-        
-        // Delete key to remove PR
-        if (e.key === 'Delete') {
+        });
+      }
+      
+      switch (e.key) {
+        case 'ArrowDown':
           e.preventDefault();
-          const prId = item.dataset.prId;
-          showConfirmDialog({
-            message: 'Remove this PR from your history?',
-            onConfirm: () => {
-              chrome.runtime.sendMessage({ 
-                action: "removePR", 
-                prId 
-              }, () => {
-                const statusIndicator = document.getElementById('status-indicator');
-                statusIndicator.textContent = 'PR removed';
-                statusIndicator.classList.remove('hidden');
-                
-                setTimeout(() => {
-                  statusIndicator.classList.add('hidden');
-                  loadPRStats();
-                }, 1500);
-              });
+          focusedIndex = Math.min(focusedIndex + 1, updatedPrItems.length - 1);
+          updatedPrItems[focusedIndex].focus();
+          break;
+          
+        case 'ArrowUp':
+          e.preventDefault();
+          focusedIndex = Math.max(focusedIndex - 1, 0);
+          updatedPrItems[focusedIndex].focus();
+          break;
+          
+        case 'Enter':
+          e.preventDefault();
+          if (focusedIndex >= 0) {
+            const url = updatedPrItems[focusedIndex].dataset.url;
+            if (url) {
+              safeCreateTab({ url });
             }
+          }
+          break;
+          
+        default:
+          break;
+      }
+    });
+    
+    // Make PR items focusable
+    prItems.forEach(item => {
+      item.setAttribute('tabindex', '0');
+    });
+  }
+  
+  // Function to load PR stats from storage
+  function loadPRStats(callback) {
+    safeSendMessage({
+      action: "removePR",
+      prId: "undefined"
+    }, () => {
+      // Get all PR stats from storage
+      safeSendMessage({ action: "getAllPRStats" }, response => {
+        if (response && response.success) {
+          // Transform data structure for easier rendering
+          const prArray = Object.keys(response.prs || {}).map(key => {
+            const pr = response.prs[key];
+            return {
+              ...pr,
+              id: key,
+              prNumber: pr.prNumber || key.replace('pr-', '')
+            };
           });
+          
+          // Update state
+          state.prs = prArray;
+          state.loading = false;
+          
+          // Render the PR list
+          renderFilteredPRs();
+          
+          // Hide loading overlay
+          hideLoadingOverlay();
+          
+          // Execute callback if provided
+          if (typeof callback === 'function') {
+            callback();
+          }
+        } else {
+          state.loading = false;
+          hideLoadingOverlay();
+          renderPRList({ prs: [] });
+          if (typeof callback === 'function') {
+            callback();
+          }
         }
       });
     });
   }
   
-  // Load PR stats from storage
-  function loadPRStats(callback) {
-    state.loading = true;
-    
-    // Request PR data from background script
-    chrome.runtime.sendMessage({ action: "getAllPRStats" }, response => {
-      state.loading = false;
-      
-      if (response && response.prs) {
-        // Transform the object into an array
-        const prsArray = Object.keys(response.prs).map(prId => ({
-          prId,
-          prNumber: response.prs[prId].prNumber || '',
-          info: response.prs[prId]
-        }));
-        
-        // Sort by last visited
-        prsArray.sort((a, b) => {
-          const dateA = new Date(a.info.lastVisited || 0);
-          const dateB = new Date(b.info.lastVisited || 0);
-          return dateB - dateA;
-        });
-        
-        // Update state
-        state.prs = prsArray;
-        // Render filtered list
-        renderFilteredPRs();
-      } else {
-        // Handle empty or error response
-        renderPRList({ prs: [] });
-      }
-      
-      // Hide loading overlay if no callback is provided
-      if (!callback) {
-        hideLoadingOverlay();
-      }
-      
-      if (callback) callback();
-    });
-  }
-  
-  // Initialize the application
+  // Initialize app on DOMContentLoaded
   initApp();
 });

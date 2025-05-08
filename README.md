@@ -4,7 +4,7 @@
 
 <img src="icon-banner.png" alt="Pull Request Watcher Banner" width="200"/>
 
-A Chrome extension for tracking and managing Bitbucket pull request reviews with optimized performance.
+A browser extension for tracking and managing Bitbucket pull request reviews with optimized performance.
 
 </div>
 
@@ -20,6 +20,7 @@ A Chrome extension for tracking and managing Bitbucket pull request reviews with
 | **Responsive design** | Works well on different screen sizes |
 | **Performance optimized** | Reduced memory usage and CPU impact |
 | **Offline support** | View your PR history without internet connection |
+| **Cross-browser compatibility** | Works on Chrome, Firefox, Edge, and Safari |
 
 ## Performance Optimizations
 
@@ -68,6 +69,7 @@ extension/
 ├── manifest.json      # Extension configuration and permissions
 ├── content.js         # Runs on Bitbucket PR pages to track activity
 ├── background.js      # Background service worker for storage & communication
+├── browser-polyfill.js # Cross-browser compatibility layer
 ├── popup.html         # User interface HTML
 ├── popup.js           # Popup functionality
 ├── utils.js           # Shared utility functions
@@ -78,17 +80,33 @@ extension/
 
 | Storage Type | Purpose | Benefits |
 |--------------|---------|----------|
-| **Chrome Storage** | Persistent storage for PR information | Data persists between sessions |
+| **Browser Storage** | Persistent storage for PR information | Data persists between sessions |
 | **Session Storage** | Cache for frequently accessed data | Reduces overhead for active sessions |
 | **Memory Cache** | DOM element cache | Improves performance by avoiding repeated queries |
 
 ## Installation
 
+### Chrome & Edge
+
 1. Download the extension files
-2. Go to Chrome's extension management page (`chrome://extensions/`)
+2. Go to Chrome's extension management page (`chrome://extensions/`) or Edge's (`edge://extensions/`)
 3. Enable "Developer mode" (toggle in the top right)
 4. Click "Load unpacked" and select the extension directory
 5. The extension is now installed and ready to use
+
+### Firefox
+
+1. Download the extension files
+2. Go to Firefox's debugging page (`about:debugging#/runtime/this-firefox`)
+3. Click "Load Temporary Add-on..."
+4. Select the manifest.json file from the extension directory
+5. For permanent installation, submit to Firefox Add-ons store
+
+### Safari
+
+1. The extension can be built for Safari using the Safari Web Extension converter tool in Xcode
+2. Follow Apple's documentation for converting and distributing web extensions
+3. Safari 14+ is required for extension support
 
 ## Usage Guide
 
@@ -119,14 +137,59 @@ extension/
 - **Refresh Data**: Click the refresh button to update your PR stats
 - **View Original PR**: Click on any PR card to open it in a new tab
 
-## Browser Support
+## Browser Support and Compatibility
 
-| Browser | Support Level |
-|---------|---------------|
-| **Chrome** | Fully supported |
-| **Edge** | Compatible (Chromium-based) |
-| **Firefox** | Currently not supported |
-| **Safari** | Currently not supported |
+| Browser | Support Level | Notes |
+|---------|---------------|-------|
+| **Chrome** | Fully supported | Primary development platform |
+| **Edge** | Fully supported | Uses Chromium-based compatibility |
+| **Firefox** | Fully supported | Uses browser-polyfill.js for APIs |
+| **Safari** | Supported (v14+) | May require additional permissions |
+
+### Browser-Specific Considerations
+
+#### Chrome/Edge
+- Works out of the box with the standard Manifest V3 implementation
+- Offers the best performance due to native API support
+
+#### Firefox
+- Uses Mozilla's browser-polyfill.js to standardize WebExtension APIs
+- Requires a browser_specific_settings section in manifest.json
+- Some API limitations with browser.storage event handling
+
+#### Safari
+- May require additional permissions for badge display
+- Storage limitations compared to other browsers
+- Performance may vary due to Apple's extension sandboxing
+
+## Cross-Browser Implementation
+
+The extension is built with browser compatibility in mind using the following patterns:
+
+1. **Unified API Access**: Using a browser detection system to access the appropriate API:
+   ```javascript
+   const browserAPI = typeof browser !== 'undefined' ? browser : chrome;
+   ```
+
+2. **Browser-Polyfill**: Including Mozilla's browser-polyfill.js to standardize WebExtension APIs across browsers
+
+3. **Browser-Specific Manifest Settings**: Including appropriate configuration for each browser:
+   ```json
+   "browser_specific_settings": {
+     "gecko": {
+       "id": "{extension-id}",
+       "strict_min_version": "109.0"
+     },
+     "edge": {
+       "browser_action_next_to_address_bar": true
+     }
+   }
+   ```
+
+4. **Resource URL Handling**: Using browser API methods to generate extension URLs:
+   ```javascript
+   browserAPI.runtime.getURL('path/to/resource')
+   ```
 
 ## Privacy
 
@@ -155,7 +218,8 @@ The extension is designed to minimize browser impact:
 - Ensure you're on a valid Bitbucket pull request page
 - Try refreshing the page
 - Check if you have other extensions that might be conflicting
-- Verify that the extension is enabled in chrome://extensions/
+- Verify that the extension is enabled in your browser's extension management page
+- For Firefox: Check that host permissions are granted
 
 </details>
 
@@ -174,8 +238,38 @@ The extension is designed to minimize browser impact:
 
 - Consider clearing your extension storage if you have many PRs tracked
 - Disable other extensions that might be competing for resources
-- Ensure your Chrome is updated to the latest version
+- Ensure your browser is updated to the latest version
 - Check for console errors by opening developer tools
+
+</details>
+
+<details>
+<summary><b>"Could not find an active browser window" Error</b></summary>
+
+This error typically occurs in Firefox when the extension tries to access browser windows but can't locate any active ones.
+
+Possible solutions:
+- Make sure you have at least one browser window open when using the extension
+- Try restarting your browser
+- In Firefox, check the extension permissions in about:addons
+- Temporarily disable and re-enable the extension
+- If you encounter this error in the badge click, try clicking the extension icon in the toolbar instead
+
+Technical explanation: This is usually caused by Firefox's stricter security model regarding window/tab access.
+
+</details>
+
+<details>
+<summary><b>Browser-Specific Issues</b></summary>
+
+#### Firefox
+- If extension doesn't work, check that you've granted the required permissions
+- For storage issues, try uninstalling and reinstalling the extension
+- If you see Promise-related errors, this is usually related to API compatibility differences
+
+#### Safari
+- For display issues, check Safari's extension settings for display permissions
+- If badge doesn't appear, try reloading the extension
 
 </details>
 
@@ -190,12 +284,12 @@ If you'd like to contribute or modify the extension:
 
 2. Make your changes, following the established code patterns
 
-3. Test thoroughly on various Bitbucket PR pages
+3. Test thoroughly on various Bitbucket PR pages and across different browsers
 
-4. Load the unpacked extension in Chrome for testing:
-   - Open `chrome://extensions/`
-   - Enable Developer mode
-   - Click "Load unpacked" and select your project folder
+4. Load the unpacked extension for testing:
+   - Chrome/Edge: Use `chrome://extensions/` or `edge://extensions/` with Developer mode
+   - Firefox: Use `about:debugging#/runtime/this-firefox`
+   - Safari: Use Xcode's Safari Web Extension development tools
 
 5. Submit a pull request with your improvements
 
@@ -206,20 +300,18 @@ If you'd like to contribute or modify the extension:
 - Write clean, maintainable code
 - Test with various Bitbucket PR layouts
 - Consider performance implications of new features
-
-## License
-
-[MIT License](LICENSE)
+- Test across all supported browsers
 
 ## Acknowledgements
 
 - Thanks to all contributors who have helped improve this extension
 - Icons provided by Material Design icons
+- Mozilla's browser-polyfill.js for cross-browser compatibility
 - Built for the Bitbucket community
 
 <div align="center">
   <p>
-    <a href="https://github.com/yourusername/pull-request-watcher/issues">Report Bug</a> •
-    <a href="https://github.com/yourusername/pull-request-watcher/issues">Request Feature</a>
+    <a href="https://github.com/khalilcharfi/Pull-Request-Watcher/issues">Report Bug</a> •
+    <a href="https://github.com/khalilcharfi/Pull-Request-Watcher/issues">Request Feature</a>
   </p>
 </div>

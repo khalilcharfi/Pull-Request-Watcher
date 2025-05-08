@@ -1,5 +1,43 @@
 // PR Tracker content script for Bitbucket PR pages
 (() => {
+  // Browser compatibility check - ensure 'browser' is available or fall back to 'chrome'
+  const getBrowserAPI = () => {
+    return typeof browser !== 'undefined' ? browser : chrome;
+  };
+  
+  // Get browser API reference
+  const browserAPI = getBrowserAPI();
+
+  // Safe wrapper for browser API calls that might fail
+  const safeSendMessage = (message, callback) => {
+    try {
+      const sendPromise = browserAPI.runtime.sendMessage(message);
+      if (sendPromise && typeof sendPromise.then === 'function') {
+        // Handle promise-based API (Firefox)
+        sendPromise
+          .then(response => {
+            if (callback && typeof callback === 'function') {
+              callback(response);
+            }
+          })
+          .catch(err => {
+            console.log("Error sending message:", err);
+            if (callback && typeof callback === 'function') {
+              callback({ success: false, error: err.message });
+            }
+          });
+      } else {
+        // Handle callback-based API (Chrome)
+        // Chrome's sendMessage uses callbacks, not promises
+      }
+    } catch (err) {
+      console.log("Error sending message:", err);
+      if (callback && typeof callback === 'function') {
+        callback({ success: false, error: err.message });
+      }
+    }
+  };
+
   // --- State and Constants ---
   let isProcessed = false;
   let currentPrId = null;
@@ -173,6 +211,24 @@
     badgeContainer.style.right = '16px';
     badgeContainer.style.zIndex = '9999';
     
+    // Save badge position in local storage if available
+    const loadSavedPosition = () => {
+      try {
+        const savedPosition = localStorage.getItem('pr-tracker-position');
+        if (savedPosition) {
+          const { top, left } = JSON.parse(savedPosition);
+          badgeContainer.style.top = top + 'px';
+          badgeContainer.style.left = left + 'px';
+          badgeContainer.style.right = 'auto'; // Clear right positioning when using left
+        }
+      } catch (e) {
+        console.error("Error loading saved position:", e);
+      }
+    };
+    
+    // Load saved position if available
+    loadSavedPosition();
+    
     try {
       const shadow = badgeContainer.attachShadow({mode: 'open'});
 
@@ -210,6 +266,12 @@
           transform: translateY(-2px); 
           box-shadow: 0 4px 12px rgba(0,0,0,0.2); 
           filter: brightness(1.05); 
+        }
+        .badge.dragging {
+          transform: none;
+          transition: none;
+          cursor: move;
+          box-shadow: 0 8px 16px rgba(0,0,0,0.3);
         }
         .badge.approved { 
           background: #1f845a; /* Green for approved */
@@ -363,13 +425,101 @@
       badge.className = 'badge';
       badge.innerHTML = `
         <div class="logo">
-          <img src="chrome-extension://${chrome.runtime.id}/images/logo_icon.png" alt="Logo">
+          <img src="${browserAPI.runtime.getURL('images/logo_icon.png')}" alt="Logo">
         </div>
         <div class="stats loading">Loading stats...</div>
       `;
-      badge.addEventListener('click', () => {
-        chrome.runtime.sendMessage({ action: "openPopup" });
+      
+      // Make the badge draggable
+      let isDragging = false;
+      let startX, startY, startLeft, startTop;
+      
+      // Handle drag start
+      const handleMouseDown = (e) => {
+        // Only handle left mouse button (button 0)
+        if (e.button !== 0) return;
+        
+        // Get the actual event (accounting for shadow DOM)
+        const event = e.composedPath ? e.composedPath()[0] : e.target;
+        
+        // Prevent default to avoid text selection during drag
+        e.preventDefault();
+        
+        // Start dragging
+        isDragging = true;
+        badge.classList.add('dragging');
+        
+        // Calculate initial position
+        const rect = badgeContainer.getBoundingClientRect();
+        startX = e.clientX;
+        startY = e.clientY;
+        
+        // Get current position (convert any 'auto' values to pixels)
+        const computedStyle = window.getComputedStyle(badgeContainer);
+        startLeft = parseInt(computedStyle.left) || 0;
+        startTop = parseInt(computedStyle.top) || 0;
+        
+        // Add event listeners for drag and end
+        document.addEventListener('mousemove', handleMouseMove);
+        document.addEventListener('mouseup', handleMouseUp);
+      };
+      
+      // Handle dragging
+      const handleMouseMove = (e) => {
+        if (!isDragging) return;
+        
+        // Calculate new position
+        const dx = e.clientX - startX;
+        const dy = e.clientY - startY;
+        
+        // Apply new position
+        badgeContainer.style.left = (startLeft + dx) + 'px';
+        badgeContainer.style.top = (startTop + dy) + 'px';
+        badgeContainer.style.right = 'auto'; // Clear right positioning when using left
+      };
+      
+      // Handle drag end
+      const handleMouseUp = (e) => {
+        if (!isDragging) return;
+        
+        // Stop dragging
+        isDragging = false;
+        badge.classList.remove('dragging');
+        
+        // Remove event listeners
+        document.removeEventListener('mousemove', handleMouseMove);
+        document.removeEventListener('mouseup', handleMouseUp);
+        
+        // Save position to localStorage
+        try {
+          const position = {
+            top: parseInt(badgeContainer.style.top),
+            left: parseInt(badgeContainer.style.left)
+          };
+          localStorage.setItem('pr-tracker-position', JSON.stringify(position));
+        } catch (e) {
+          console.error("Error saving position:", e);
+        }
+      };
+      
+      // Add event listeners
+      badge.addEventListener('mousedown', handleMouseDown);
+      
+      // Preserve the click functionality
+      badge.addEventListener('click', (e) => {
+        // Only trigger click if we didn't just finish dragging
+        if (!isDragging) {
+          // Use safe message sending
+          try {
+            browserAPI.runtime.sendMessage({ action: "openPopup" }).catch(err => {
+              console.log("Error opening popup:", err);
+            });
+          } catch (err) {
+            console.log("Error sending openPopup message:", err);
+          }
+        }
       });
+      
       shadow.appendChild(badge);
       document.body.appendChild(badgeContainer);
       return badge;
@@ -439,7 +589,7 @@
         } else {
           // Get PR stats from storage if cache is older
           statsPromise = new Promise(resolve => {
-            chrome.runtime.sendMessage({ action: "getPRStats", prId: currentPrId }, (response) => {
+            browserAPI.runtime.sendMessage({ action: "getPRStats", prId: currentPrId }, (response) => {
               if (!response || !response.stats) {
                 response = { stats: { reviewCount: 0, approvalCount: 0 }, info: {} };
               }
@@ -450,7 +600,7 @@
       } catch (e) {
         // Fallback to Chrome storage if parsing fails
         statsPromise = new Promise(resolve => {
-          chrome.runtime.sendMessage({ action: "getPRStats", prId: currentPrId }, (response) => {
+          browserAPI.runtime.sendMessage({ action: "getPRStats", prId: currentPrId }, (response) => {
             if (!response || !response.stats) {
               response = { stats: { reviewCount: 0, approvalCount: 0 }, info: {} };
             }
@@ -461,7 +611,7 @@
     } else {
       // No session data, use Chrome storage
       statsPromise = new Promise(resolve => {
-        chrome.runtime.sendMessage({ action: "getPRStats", prId: currentPrId }, (response) => {
+        browserAPI.runtime.sendMessage({ action: "getPRStats", prId: currentPrId }, (response) => {
           if (!response || !response.stats) {
             response = { stats: { reviewCount: 0, approvalCount: 0 }, info: {} };
           }
@@ -520,7 +670,7 @@
         // Check if we need to update the content
         const statsHtml = `
           <div class="logo">
-            ${prInfo.status === 'merged' ? '<span style="font-size: 20px; padding: 0 4px;">🎉</span>' : `<img src="chrome-extension://${chrome.runtime.id}/images/logo_icon.png" alt="Logo">`}
+            ${prInfo.status === 'merged' ? '<span style="font-size: 20px; padding: 0 4px;">🎉</span>' : `<img src="${browserAPI.runtime.getURL('images/logo_icon.png')}" alt="Logo">`}
           </div>
           <div class="stats">
             <div class="stat" title="Views">
@@ -628,7 +778,7 @@
       }
       
       // Fall back to Chrome storage
-      chrome.storage.local.get([`pr-info-${prInfo.storageKey}`, prInfo.storageKey], (result) => {
+      browserAPI.storage.local.get([`pr-info-${prInfo.storageKey}`, prInfo.storageKey], (result) => {
         resolve({
           existingInfo: result[`pr-info-${prInfo.storageKey}`] || {},
           existingStats: result[prInfo.storageKey] || { reviewCount: 0, approvalCount: 0 },
@@ -666,12 +816,12 @@
       sessionStorage.setItem(`pr-info-${prInfo.storageKey}`, JSON.stringify(prInfoObj));
       
       // Update PR info in local storage
-      chrome.storage.local.set({ [`pr-info-${prInfo.storageKey}`]: prInfoObj });
+      browserAPI.storage.local.set({ [`pr-info-${prInfo.storageKey}`]: prInfoObj });
       
       // Only increment view if coming from user navigation, not from cache refresh
       if (!fromCache) {
-        // Send message to increment view count (isApproval: false triggers view count increment)
-        chrome.runtime.sendMessage({
+        // Send message to increment view count
+        browserAPI.runtime.sendMessage({
           action: "updatePRStats",
           prId: prInfo.storageKey,
           prInternalId: prInfo.internalId,
@@ -1028,7 +1178,7 @@
     if (!prInfo) return;
     
     // Retrieve the most up-to-date PR stats from storage
-    chrome.storage.local.get([`pr-info-${currentPrId}`, currentPrId], (result) => {
+    browserAPI.storage.local.get([`pr-info-${currentPrId}`, currentPrId], (result) => {
       const existingInfo = result[`pr-info-${currentPrId}`] || {};
       const existingStats = result[currentPrId] || { reviewCount: 0, approvalCount: 0 };
       
@@ -1053,13 +1203,13 @@
       };
       
       // Update storage with fresh data
-      chrome.storage.local.set({ [`pr-info-${currentPrId}`]: prInfoObj });
+      browserAPI.storage.local.set({ [`pr-info-${currentPrId}`]: prInfoObj });
       
       // Update the badge with the correct stats
       updateStatsBadge();
       
       // Send updated stats to background - don't increment view count here (shouldIncrementView: false)
-      chrome.runtime.sendMessage({
+      browserAPI.runtime.sendMessage({
         action: "updatePRStats",
         prId: currentPrId,
         prInternalId: prInfo.internalId,
@@ -1112,9 +1262,9 @@
           const prInfo = getPRInfo();
           if (prInfo) {
             prInfo.isApprovedByMe = isApproved;
-            chrome.storage.local.get([`pr-info-${currentPrId}`], (result) => {
+            browserAPI.storage.local.get([`pr-info-${currentPrId}`], (result) => {
               const existingInfo = result[`pr-info-${currentPrId}`] || {};
-              chrome.storage.local.set({ 
+              browserAPI.storage.local.set({ 
                 [`pr-info-${currentPrId}`]: {
                   ...existingInfo,
                   isApprovedByMe: isApproved
@@ -1128,7 +1278,7 @@
           
           // If the user has approved the PR, update the stats with an approval count increment
           if (isApproved) {
-            chrome.runtime.sendMessage({
+            browserAPI.runtime.sendMessage({
               action: "updatePRStats",
               prId: currentPrId,
               isApproval: true,
@@ -1136,7 +1286,7 @@
             }, () => updateStatsBadge());
           } else {
             // Update with new approval count even if unapproved
-            chrome.runtime.sendMessage({
+            browserAPI.runtime.sendMessage({
               action: "updatePRStats",
               prId: currentPrId,
               isApproval: false,
@@ -1149,12 +1299,11 @@
   };
 
   const setupMessageListener = () => {
-    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-      if (message.action === "updateBadge") {
+    browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
+      if (message.action === "updateBadge" && message.prId === currentPrId) {
         updateStatsBadge();
-        sendResponse({ success: true });
       }
-      return true;
+      sendResponse({ success: true });
     });
   };
 

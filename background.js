@@ -1,5 +1,14 @@
 // Background script for handling communication between content script and popup
-chrome.runtime.onInstalled.addListener(() => {
+
+// Browser compatibility check - ensure 'browser' is available or fall back to 'chrome'
+const getBrowserAPI = () => {
+  return typeof browser !== 'undefined' ? browser : chrome;
+};
+
+// Get browser API reference
+const browserAPI = getBrowserAPI();
+
+browserAPI.runtime.onInstalled.addListener(() => {
   // Clean up potential duplicate entries on extension update/install
   cleanupDuplicatePRs();
   // Clean up any PRs with unknown project or repo
@@ -13,7 +22,7 @@ function isProjectOrRepoUnknown(prInfo) {
 }
 
 function cleanupUnknownPRs() {
-  chrome.storage.local.get(null, (result) => {
+  browserAPI.storage.local.get(null, (result) => {
     const toRemove = [];
 
     Object.keys(result).forEach(key => {
@@ -46,7 +55,7 @@ function addPrIdToRemove(key, result, toRemove) {
 
 function removeItemsIfNeeded(toRemove) {
   if (toRemove.length > 0) {
-    chrome.storage.local.remove(toRemove, () => {
+    browserAPI.storage.local.remove(toRemove, () => {
       console.log(`Cleaned up ${toRemove.length} items with unknown project/repo`);
     });
   }
@@ -54,7 +63,7 @@ function removeItemsIfNeeded(toRemove) {
 
 // Clean up duplicate PR entries by normalizing to the pr-123 format
 function cleanupDuplicatePRs() {
-  chrome.storage.local.get(null, (result) => {
+  browserAPI.storage.local.get(null, (result) => {
     const updates = {};
     const toRemove = [];
     const prIds = new Set();
@@ -121,9 +130,9 @@ function cleanupDuplicatePRs() {
     
     // Apply the changes if needed
     if (Object.keys(updates).length > 0) {
-      chrome.storage.local.set(updates, () => {
+      browserAPI.storage.local.set(updates, () => {
         if (toRemove.length > 0) {
-          chrome.storage.local.remove(toRemove);
+          browserAPI.storage.local.remove(toRemove);
         }
       });
     }
@@ -153,14 +162,14 @@ function isSameBitbucketPr(url1, url2) {
 }
 
 // Handler for all extension messages
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // Use message action for cleaner switch pattern
   switch (message.action) {
     case "getPRStats":
       // Get single PR stats
       if (message.prId) {
         const prInfoKey = `pr-info-${message.prId}`;
-        chrome.storage.local.get([message.prId, prInfoKey], (result) => {
+        browserAPI.storage.local.get([message.prId, prInfoKey], (result) => {
           sendResponse({
             stats: result[message.prId] || { reviewCount: 0, approvalCount: 0 },
             info: result[prInfoKey] || {}
@@ -178,7 +187,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const prInfoKey = `pr-info-${prId}`;
       
       // Check if this is an Unknown/Unknown PR before updating stats
-      chrome.storage.local.get([prInfoKey], (result) => {
+      browserAPI.storage.local.get([prInfoKey], (result) => {
         const prInfo = result[prInfoKey];
         
         // Skip if this PR has either Unknown project or Unknown repo
@@ -189,7 +198,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
         
         // Continue with updating stats
-        chrome.storage.local.get([prId, prInfoKey], (result) => {
+        browserAPI.storage.local.get([prId, prInfoKey], (result) => {
           const stats = result[prId] || { reviewCount: 0, approvalCount: 0, lastReviewed: Date.now() };
           const prInfoData = result[prInfoKey] || {};
           
@@ -218,7 +227,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           }
           
           // Write back to storage
-          chrome.storage.local.set({ 
+          browserAPI.storage.local.set({ 
             [prId]: stats,
             [prInfoKey]: updatedPrInfo
           }, () => {
@@ -232,7 +241,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       
     case "getAllPRStats":
       // Get all stored PRs for the popup
-      chrome.storage.local.get(null, (result) => {
+      browserAPI.storage.local.get(null, (result) => {
         const prs = {};
         
         // Process all PR info entries
@@ -257,46 +266,72 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return true;
       
     case "removePR":
-      // Also remove the PR info from storage
-      const removePrInfoKey = `pr-info-${message.prId}`;
-      
-      // Remove both PR stats and PR info
-      chrome.storage.local.remove([message.prId, removePrInfoKey], () => {
-        // Broadcast the removal
-        broadcastStatsUpdate(message.prId);
-        sendResponse({ success: true });
-      });
-      return true;
-      
-    case "openPopup":
-      // Handle request to open popup (from badge click)
-      chrome.action.openPopup();
-      sendResponse({ success: true });
+      if (message.prId) {
+        const prInfoKey = `pr-info-${message.prId}`;
+        browserAPI.storage.local.remove([message.prId, prInfoKey], () => {
+          sendResponse({ success: true });
+        });
+      } else {
+        sendResponse({ success: false, error: "Invalid PR ID" });
+      }
       return true;
       
     case "cleanupUnknown":
-      // Clean up PRs with unknown project or repo
       cleanupUnknownPRs();
       sendResponse({ success: true });
+      return true;
+    
+    case "openPopup":
+      // Handle request to open popup explicitly for Firefox
+      if (typeof browser !== 'undefined' && browser.browserAction) {
+        try {
+          browser.browserAction.openPopup().catch(err => {
+            console.log("Error opening popup:", err);
+            // Send response even if there's an error
+            sendResponse({ success: false, error: err.message });
+          });
+        } catch (err) {
+          console.log("Error opening popup:", err);
+          sendResponse({ success: false, error: err.message });
+        }
+      } else {
+        // If browserAction API is not available, just respond with success
+        // Chrome and Edge don't need this method
+        sendResponse({ success: true });
+      }
+      return true;
+      
+    default:
+      sendResponse({ success: false, error: "Unknown action" });
       return true;
   }
 });
 
-/**
- * Broadcast stat updates to all tabs and popup
- * This enables reactive data flow between components
- * @param {string} prId - ID of the PR that was updated
- */
+// Broadcast updates to open tabs and popup
 function broadcastStatsUpdate(prId) {
-  // Send message to all Bitbucket tabs
-  chrome.tabs.query({ url: "*://*.bitbucket.org/*/pull-requests/*" }, (tabs) => {
-    for (const tab of tabs) {
-      chrome.tabs.sendMessage(tab.id, { 
-        action: "updateBadge",
-        prId
-      }).catch(() => {
-        // Ignore errors from tabs that don't have content script running
-      });
-    }
-  });
+  const message = { action: "statsUpdated", prId };
+  
+  // Send to all tabs that might be interested
+  try {
+    browserAPI.tabs.query({ url: "*://*.bitbucket.org/*/pull-requests/*" }, (tabs) => {
+      if (tabs && tabs.length > 0) {
+        tabs.forEach(tab => {
+          browserAPI.tabs.sendMessage(tab.id, message).catch(err => {
+            // Silently handle errors - tab might not have content script running
+          });
+        });
+      }
+    });
+  } catch (err) {
+    console.log("Error querying tabs:", err);
+  }
+  
+  // Also notify the popup if it's open
+  try {
+    browserAPI.runtime.sendMessage(message).catch(err => {
+      // Popup might not be open, ignore errors
+    });
+  } catch (err) {
+    console.log("Error sending runtime message:", err);
+  }
 } 

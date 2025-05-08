@@ -721,17 +721,16 @@
   </style>
 </head>
 <body>
-  <div class="container" id="app">
-    <!-- Header and PR list will be dynamically inserted by popup.js -->
+  <div id="app" class="container">
     <div id="pr-list"></div>
   </div>
   
-  <!-- Loading overlay (hidden by default) -->
-  <div id="loading-overlay" class="popup-overlay hidden">
+  <div id="loading-overlay" class="loading-overlay">
     <div class="spinner"></div>
-    <p>Loading...</p>
+    <p>Loading PRs...</p>
   </div>
   
+  <script src="browser-polyfill.js"></script>
   <script src="popup.js"></script>
 </body>
 </html> 

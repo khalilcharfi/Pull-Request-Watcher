@@ -205,7 +205,7 @@ function extractBitbucketPrInfo() {
           const workspaceLink = breadcrumbLinks[0];
           if (workspaceLink && workspaceLink.href.includes(window.location.origin)) {
             const hrefParts = new URL(workspaceLink.href).pathname.split('/').filter(p => p);
-            if (hrefParts.length === 1 && !info.workspace) { // e.g., /check24/
+            if (hrefParts.length === 1 && !info.workspace) {
               info.workspace = hrefParts[0];
               addSource("DOM (Breadcrumbs - Workspace)");
             }
@@ -235,7 +235,7 @@ function extractBitbucketPrInfo() {
                  // Try to infer workspace from its href if not found
                  if (!info.workspace && href) {
                     const parts = href.split('/');
-                    if (parts.length >= 3) info.workspace = parts[1]; // e.g., /check24/fvk-core
+                    if (parts.length >= 3) info.workspace = parts[1]; 
                  }
                  break;
             }
