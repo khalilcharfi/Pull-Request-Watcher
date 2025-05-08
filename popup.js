@@ -201,7 +201,11 @@ document.addEventListener('DOMContentLoaded', () => {
     createAppStructure();
     setupEventListeners();
     showLoadingOverlay('Loading PRs...');
-    loadPRStats();
+    
+    // First check if the background script is alive
+    pingBackgroundScript(() => {
+      loadPRStats();
+    });
   }
   
   // Setup all event listeners
@@ -394,7 +398,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Filter PRs based on current filter settings
   function filterPRs(prs) {
-    return prs.filter(pr => {
+    console.log("[DEBUG] filterPRs input:", prs);
+    console.log("[DEBUG] Current filter state:", state.filter);
+    
+    if (!prs || prs.length === 0) {
+      console.log("[DEBUG] No PRs to filter");
+      return [];
+    }
+    
+    const filtered = prs.filter(pr => {
       // Apply text search filter
       const textMatch = state.filter.text === '' || 
         pr.title?.toLowerCase().includes(state.filter.text) ||
@@ -407,13 +419,27 @@ document.addEventListener('DOMContentLoaded', () => {
         (pr.isApprovedByMe && state.filter.showApproved) ||
         (!pr.isApprovedByMe && state.filter.showPending);
       
+      if (!textMatch) {
+        console.log("[DEBUG] PR filtered out by text search:", pr.id);
+      }
+      if (!approvalMatch) {
+        console.log("[DEBUG] PR filtered out by approval filter:", pr.id);
+      }
+      
       return textMatch && approvalMatch;
     });
+    
+    console.log("[DEBUG] filterPRs output:", filtered);
+    return filtered;
   }
   
   // Render PRs based on current filter state
   function renderFilteredPRs() {
+    console.log("[DEBUG] renderFilteredPRs called, state.prs:", state.prs);
+    
     const filteredPRs = filterPRs(state.prs);
+    console.log("[DEBUG] filteredPRs:", filteredPRs);
+    
     renderPRList({ prs: filteredPRs });
     
     // Update PR count
@@ -427,11 +453,17 @@ document.addEventListener('DOMContentLoaded', () => {
   
   // Render list of PRs
   function renderPRList({ prs }) {
-    if (!prListElement) return;
+    console.log("[DEBUG] renderPRList called with:", prs);
+    
+    if (!prListElement) {
+      console.error("[DEBUG] prListElement is null or undefined");
+      return;
+    }
     
     prListElement.innerHTML = '';
     
     if (!prs || prs.length === 0) {
+      console.log("[DEBUG] No PRs to display, showing empty state");
       const emptyState = document.createElement('div');
       emptyState.className = 'empty-state';
       emptyState.innerHTML = `
@@ -629,52 +661,136 @@ document.addEventListener('DOMContentLoaded', () => {
   // Function to load PR stats from storage
   function loadPRStats(callback) {
     let messageTimeout = setTimeout(() => {
-      console.warn("loadPRStats timed out after 5 seconds");
-      state.loading = false;
-      hideLoadingOverlay();
-      renderPRList({ prs: [] });
-      
-      // Show error message
-      const prList = document.getElementById('pr-list');
-      if (prList) {
-        prList.innerHTML = `
-          <div class="empty-state">
-            ${ICONS.no_data}
-            <p>Connection timed out</p>
-            <p class="empty-subtitle">Please try again</p>
-          </div>
-        `;
-      }
-      
-      if (typeof callback === 'function') {
-        callback();
-      }
+      console.warn("[DEBUG] loadPRStats timed out after 5 seconds");
+      // Try to use the cached data as a fallback
+      tryUsingCachedData(() => {
+        state.loading = false;
+        hideLoadingOverlay();
+        renderPRList({ prs: [] });
+        
+        // Show error message with debug button
+        const prList = document.getElementById('pr-list');
+        if (prList) {
+          prList.innerHTML = `
+            <div class="empty-state">
+              ${ICONS.no_data}
+              <p>Connection timed out</p>
+              <p class="empty-subtitle">Please try again</p>
+              <button id="debug-storage-btn" style="margin-top:15px;padding:8px 15px;background-color:var(--primary-blue);color:white;border:none;border-radius:4px;cursor:pointer;">
+                Debug Storage
+              </button>
+            </div>
+          `;
+          
+          // Add event listener to the debug button
+          setTimeout(() => {
+            const debugBtn = document.getElementById('debug-storage-btn');
+            if (debugBtn) {
+              debugBtn.addEventListener('click', debugStorage);
+            }
+          }, 100);
+        }
+        
+        if (typeof callback === 'function') {
+          callback();
+        }
+      });
     }, 5000);
     
-    // Clean up undefined PRs first (defensive coding)
-    safeSendMessage({
-      action: "removePR",
-      prId: "undefined"
-    }, () => {
-      // Get all PR stats from storage
-      safeSendMessage({ action: "getAllPRStats" }, response => {
-        clearTimeout(messageTimeout);
+    console.log("[DEBUG] Starting loadPRStats...");
+    
+    // First try to load from the cache for immediate response
+    tryUsingCachedData((hasCachedData) => {
+      if (hasCachedData) {
+        console.log("[DEBUG] Used cached data, loading complete");
+        clearTimeout(messageTimeout); 
+        if (typeof callback === 'function') {
+          callback();
+        }
+        return;
+      }
+      
+      // If no cached data, continue with normal loading
+      // Clean up undefined PRs first (defensive coding)
+      safeSendMessage({
+        action: "removePR",
+        prId: "undefined"
+      }, () => {
+        console.log("[DEBUG] Removed undefined PRs, getting all PR stats...");
         
-        if (response && response.success && response.prs) {
-          try {
-            // Transform data structure for easier rendering
-            const prArray = Object.keys(response.prs || {}).map(key => {
-              const pr = response.prs[key];
-              if (!pr) return null;
+        // Get all PR stats from storage
+        safeSendMessage({ action: "getAllPRStats" }, response => {
+          clearTimeout(messageTimeout);
+          console.log("[DEBUG] getAllPRStats response:", response);
+          
+          if (response && response.success && response.prs) {
+            try {
+              console.log("[DEBUG] PR data keys:", Object.keys(response.prs));
               
-              return {
-                ...pr,
-                id: key,
-                prNumber: pr.prNumber || key.replace('pr-', '')
-              };
-            }).filter(Boolean); // Remove null entries
-            
-            // Update state
+              // Transform data structure for easier rendering
+              const prArray = Object.keys(response.prs || {}).map(key => {
+                const pr = response.prs[key];
+                if (!pr) {
+                  console.log("[DEBUG] Null PR for key:", key);
+                  return null;
+                }
+                
+                console.log("[DEBUG] Processing PR:", key, pr);
+                return {
+                  ...pr,
+                  id: key,
+                  prNumber: pr.prNumber || key.replace('pr-', '')
+                };
+              }).filter(Boolean); // Remove null entries
+              
+              console.log("[DEBUG] Processed PR array:", prArray);
+              
+              // Update state
+              state.prs = prArray;
+              state.loading = false;
+              
+              // Render the PR list
+              renderFilteredPRs();
+              
+              // Hide loading overlay
+              hideLoadingOverlay();
+              
+              // Execute callback if provided
+              if (typeof callback === 'function') {
+                callback();
+              }
+            } catch (err) {
+              console.error("[DEBUG] Error processing PR data:", err);
+              handleLoadError();
+            }
+          } else {
+            console.warn("[DEBUG] No PRs found or invalid response:", response);
+            handleLoadError();
+          }
+        });
+      });
+    });
+    
+    function tryUsingCachedData(callback) {
+      console.log("[DEBUG] Trying to use cached data...");
+      const browserAPI = getBrowserAPI();
+      
+      browserAPI.storage.local.get(['pr_data_cache'], (result) => {
+        if (result.pr_data_cache && result.pr_data_cache.data) {
+          console.log("[DEBUG] Found cached data from:", new Date(result.pr_data_cache.timestamp));
+          
+          const cachedPrs = result.pr_data_cache.data;
+          // Get array of PR objects from the cache
+          const prArray = Object.keys(cachedPrs).map(key => {
+            return {
+              ...cachedPrs[key],
+              id: key
+            };
+          }).filter(pr => pr && pr.title);
+          
+          if (prArray.length > 0) {
+            console.log("[DEBUG] Using cached data:", prArray.length, "PRs");
+            // Update state with cached data
             state.prs = prArray;
             state.loading = false;
             
@@ -684,31 +800,172 @@ document.addEventListener('DOMContentLoaded', () => {
             // Hide loading overlay
             hideLoadingOverlay();
             
-            // Execute callback if provided
-            if (typeof callback === 'function') {
-              callback();
-            }
-          } catch (err) {
-            console.error("Error processing PR data:", err);
-            handleLoadError();
+            if (callback) callback(true);
+            return;
           }
-        } else {
-          console.warn("No PRs found or invalid response:", response);
-          handleLoadError();
         }
+        console.log("[DEBUG] No usable cached data found");
+        if (callback) callback(false);
       });
-    });
+    }
     
     function handleLoadError() {
-      state.loading = false;
-      hideLoadingOverlay();
-      state.prs = [];
-      renderPRList({ prs: [] });
-      
-      if (typeof callback === 'function') {
-        callback();
-      }
+      console.log("[DEBUG] In handleLoadError");
+      // Try to use cached data as fallback
+      tryUsingCachedData((hasCachedData) => {
+        if (!hasCachedData) {
+          state.loading = false;
+          hideLoadingOverlay();
+          state.prs = [];
+          renderPRList({ prs: [] });
+        }
+        
+        if (typeof callback === 'function') {
+          callback();
+        }
+      });
     }
+  }
+  
+  // Function to directly debug what's in storage
+  function debugStorage() {
+    console.log("[DEBUG] Attempting to directly access storage...");
+    
+    try {
+      const browserAPI = getBrowserAPI();
+      browserAPI.storage.local.get(null, (items) => {
+        console.log("[DEBUG] Direct storage access result:", items);
+        
+        if (items && Object.keys(items).length > 0) {
+          // Show raw storage data
+          let storageInfo = document.createElement('div');
+          storageInfo.className = 'storage-debug-info';
+          storageInfo.style.marginTop = '20px';
+          storageInfo.style.padding = '10px';
+          storageInfo.style.backgroundColor = '#f5f5f5';
+          storageInfo.style.borderRadius = '4px';
+          storageInfo.style.maxHeight = '300px';
+          storageInfo.style.overflow = 'auto';
+          storageInfo.style.textAlign = 'left';
+          
+          storageInfo.innerHTML = `
+            <h3 style="font-size:14px;margin-bottom:10px;">Raw Storage Data:</h3>
+            <pre style="font-size:11px;white-space:pre-wrap;word-break:break-all;">${JSON.stringify(items, null, 2)}</pre>
+          `;
+          
+          // Find PR info entries
+          const prInfoEntries = Object.keys(items).filter(k => k.startsWith('pr-info-'));
+          console.log("[DEBUG] PR info entries:", prInfoEntries);
+          
+          if (prInfoEntries.length > 0) {
+            // Try to manually create PR items
+            const manualPrs = prInfoEntries.map(key => {
+              const prId = key.substring(8); // Remove 'pr-info-' prefix
+              const stats = items[prId] || { reviewCount: 0, approvalCount: 0 };
+              return {
+                ...items[key],
+                id: prId,
+                prNumber: items[key].prNumber || prId.replace('pr-', ''),
+                viewCount: stats.reviewCount || 0,
+                approvalCount: stats.approvalCount || 0
+              };
+            }).filter(p => p && p.title); // Only keep valid PRs
+            
+            console.log("[DEBUG] Manually created PR list:", manualPrs);
+            
+            if (manualPrs.length > 0) {
+              // Show option to use manually created list
+              const useManualBtn = document.createElement('button');
+              useManualBtn.textContent = 'Use Available Data';
+              useManualBtn.style.marginTop = '10px';
+              useManualBtn.style.padding = '8px 15px';
+              useManualBtn.style.backgroundColor = 'var(--success-green)';
+              useManualBtn.style.color = 'white';
+              useManualBtn.style.border = 'none';
+              useManualBtn.style.borderRadius = '4px';
+              useManualBtn.style.cursor = 'pointer';
+              
+              useManualBtn.addEventListener('click', () => {
+                // Update state with manual data
+                state.prs = manualPrs;
+                state.loading = false;
+                renderFilteredPRs();
+              });
+              
+              storageInfo.appendChild(useManualBtn);
+            }
+          }
+          
+          // Get the PR list or empty state container
+          const container = document.querySelector('.empty-state') || document.getElementById('pr-list');
+          if (container) {
+            container.appendChild(storageInfo);
+          }
+        } else {
+          console.log("[DEBUG] No data found in storage");
+          alert("No data found in storage");
+        }
+      });
+    } catch (err) {
+      console.error("[DEBUG] Error accessing storage directly:", err);
+      alert("Error accessing storage: " + err.message);
+    }
+  }
+  
+  // Check if the background script is responsive
+  function pingBackgroundScript(callback) {
+    console.log("[DEBUG] Pinging background script...");
+    
+    let pingTimeout = setTimeout(() => {
+      console.error("[DEBUG] Background script ping timed out!");
+      
+      // Update the loading message to indicate the issue
+      const overlay = document.getElementById('loading-overlay');
+      const messageEl = overlay.querySelector('p');
+      if (messageEl) {
+        messageEl.textContent = "Cannot connect to extension background service. Please try reloading.";
+      }
+      
+      // Add a reload button
+      const spinner = overlay.querySelector('.spinner');
+      if (spinner) {
+        const reloadBtn = document.createElement('button');
+        reloadBtn.className = 'reload-btn';
+        reloadBtn.textContent = 'Reload Extension';
+        reloadBtn.style.marginTop = '15px';
+        reloadBtn.style.padding = '8px 15px';
+        reloadBtn.style.border = 'none';
+        reloadBtn.style.borderRadius = '4px';
+        reloadBtn.style.backgroundColor = 'var(--primary-blue)';
+        reloadBtn.style.color = 'white';
+        reloadBtn.style.cursor = 'pointer';
+        
+        reloadBtn.addEventListener('click', () => {
+          location.reload();
+        });
+        
+        spinner.after(reloadBtn);
+      }
+    }, 3000);
+    
+    safeSendMessage({ action: "ping" }, response => {
+      clearTimeout(pingTimeout);
+      
+      if (response && response.success) {
+        console.log("[DEBUG] Background script responded:", response.message);
+        if (typeof callback === 'function') {
+          callback();
+        }
+      } else {
+        console.error("[DEBUG] Background script ping failed:", response);
+        // Show error in overlay
+        const overlay = document.getElementById('loading-overlay');
+        const messageEl = overlay.querySelector('p');
+        if (messageEl) {
+          messageEl.textContent = "Background service error. Please reload extension.";
+        }
+      }
+    });
   }
   
   // Initialize app on DOMContentLoaded

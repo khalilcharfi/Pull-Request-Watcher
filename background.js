@@ -163,8 +163,15 @@ function isSameBitbucketPr(url1, url2) {
 
 // Handler for all extension messages
 browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  console.log("Received message in background.js:", message.action);
+  
   // Use message action for cleaner switch pattern
   switch (message.action) {
+    case "ping":
+      console.log("Ping received in background.js");
+      sendResponse({ success: true, message: "Background script is running!" });
+      return true;
+      
     case "getPRStats":
       // Get single PR stats
       if (message.prId) {
