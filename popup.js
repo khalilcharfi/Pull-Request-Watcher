@@ -498,66 +498,103 @@ document.addEventListener('DOMContentLoaded', () => {
       return (b.lastVisited || 0) - (a.lastVisited || 0);
     });
     
+    console.log("[DEBUG] Sorted PRs to render:", sortedPRs);
+    
+    // Add a container for the PR items to ensure proper styling
+    const prContainer = document.createElement('div');
+    prContainer.className = 'pr-items';
+    prListElement.appendChild(prContainer);
+    
     // Create PR items
-    sortedPRs.forEach(pr => {
+    sortedPRs.forEach((pr, index) => {
       // Skip empty or invalid PRs
-      if (!pr || !pr.title) return;
-      
-      const prItem = document.createElement('div');
-      prItem.className = `pr-item ${pr.status || 'open'} ${pr.isApprovedByMe ? 'approved' : 'pending'}`;
-      prItem.dataset.prId = pr.id;
-      prItem.dataset.url = pr.url;
-      
-      // Handle project truncation for long names
-      let displayProject = pr.displayProject || pr.project || 'Unknown';
-      let displayRepo = pr.displayRepo || pr.repo || 'Unknown';
-      
-      // Truncate long display names
-      if (displayProject.length > 20) {
-        displayProject = displayProject.substring(0, 18) + '...';
-      }
-      if (displayRepo.length > 20) {
-        displayRepo = displayRepo.substring(0, 18) + '...';
+      if (!pr || !pr.title) {
+        console.log("[DEBUG] Skipping invalid PR:", pr);
+        return;
       }
       
-      // Format time string
-      const timeAgo = getTimeAgo(pr.lastVisited);
-      
-      // Build HTML with optimized rendering
-      prItem.innerHTML = `
-        <div class="pr-info">
-          <div class="pr-title" title="${pr.title || 'Untitled PR'}">${pr.title || 'Untitled PR'}</div>
-          <div class="pr-project" title="${pr.project || 'Unknown'}/${pr.repo || 'Unknown'}">
-            ${ICONS.folder} ${displayProject}/${displayRepo}
-          </div>
-          <div class="pr-meta">
-            <span class="pr-number" title="PR #${pr.prNumber}">
-              #${pr.prNumber}
-            </span>
-            ${pr.status !== 'open' ? `<span class="pr-status ${pr.status}">${pr.status}</span>` : ''}
-            <span class="pr-time" title="Last visited: ${new Date(pr.lastVisited).toLocaleString()}">
-              ${ICONS.calendar} ${timeAgo}
-            </span>
-          </div>
-        </div>
-        <div class="pr-stats">
-          <div class="stat ${pr.viewCount > 0 ? 'has-value' : ''}" title="Views">
-            ${ICONS.visibility}
-            <span>${pr.viewCount || 0}</span>
-          </div>
-          <div class="stat ${pr.approvalCount > 0 ? 'has-value' : ''}" title="Approved">
-            ${ICONS.thumb_up}
-            <span>${pr.approvalCount || 0}</span>
-          </div>
-          <button class="remove-btn" data-pr-id="${pr.id}" title="Remove from history">${ICONS.close}</button>
-        </div>
-      `;
-      
-      prListElement.appendChild(prItem);
+      try {
+        console.log(`[DEBUG] Rendering PR ${index}:`, pr.title);
+        
+        const prItem = document.createElement('div');
+        prItem.className = `pr-item ${pr.status || 'open'} ${pr.isApprovedByMe ? 'approved' : 'pending'}`;
+        prItem.dataset.prId = pr.id;
+        prItem.dataset.url = pr.url || '';
+        
+        // Add explicit styling to ensure visibility
+        prItem.style.display = 'flex';
+        prItem.style.padding = '10px';
+        prItem.style.marginBottom = '8px';
+        prItem.style.justifyContent = 'space-between';
+        
+        // Handle project truncation for long names
+        let displayProject = pr.displayProject || pr.project || 'Unknown';
+        let displayRepo = pr.displayRepo || pr.repo || 'Unknown';
+        
+        // Truncate long display names
+        if (displayProject.length > 20) {
+          displayProject = displayProject.substring(0, 18) + '...';
+        }
+        if (displayRepo.length > 20) {
+          displayRepo = displayRepo.substring(0, 18) + '...';
+        }
+        
+        // Format time string
+        const timeAgo = getTimeAgo(pr.lastVisited || Date.now());
+        
+        // Build HTML with optimized rendering
+        try {
+          prItem.innerHTML = `
+            <div class="pr-info" style="flex: 1;">
+              <div class="pr-title" title="${pr.title || 'Untitled PR'}" style="font-weight: 500; margin-bottom: 4px;">${pr.title || 'Untitled PR'}</div>
+              <div class="pr-project" title="${pr.project || 'Unknown'}/${pr.repo || 'Unknown'}" style="font-size: 11px; color: var(--text-secondary); margin-bottom: 4px;">
+                ${ICONS.folder} ${displayProject}/${displayRepo}
+              </div>
+              <div class="pr-meta" style="font-size: 10px; color: var(--text-secondary); display: flex; gap: 6px;">
+                <span class="pr-number" title="PR #${pr.prNumber || 'unknown'}">
+                  #${pr.prNumber || 'unknown'}
+                </span>
+                ${pr.status && pr.status !== 'open' ? `<span class="pr-status ${pr.status}">${pr.status}</span>` : ''}
+                <span class="pr-time" title="Last visited: ${new Date(pr.lastVisited || 0).toLocaleString()}">
+                  ${ICONS.calendar} ${timeAgo}
+                </span>
+              </div>
+            </div>
+            <div class="pr-stats" style="display: flex; gap: 10px; align-items: center;">
+              <div class="stat" title="Views" style="display: flex; align-items: center;">
+                ${ICONS.visibility}
+                <span style="margin-left: 3px;">${pr.viewCount || 0}</span>
+              </div>
+              <div class="stat" title="Approved" style="display: flex; align-items: center;">
+                ${ICONS.thumb_up}
+                <span style="margin-left: 3px;">${pr.approvalCount || 0}</span>
+              </div>
+              <button class="remove-btn" data-pr-id="${pr.id}" title="Remove from history" style="background: none; border: none; cursor: pointer; color: var(--text-tertiary);">${ICONS.close}</button>
+            </div>
+          `;
+          
+          console.log(`[DEBUG] PR ${index} HTML generated`);
+        } catch (err) {
+          console.error("[DEBUG] Error generating PR HTML:", err);
+          prItem.textContent = `Error rendering PR: ${pr.title || 'Unknown'}`;
+        }
+        
+        // Explicitly append to prContainer
+        prContainer.appendChild(prItem);
+        console.log(`[DEBUG] PR ${index} rendered and added to DOM`);
+      } catch (err) {
+        console.error("[DEBUG] Error rendering PR:", err, pr);
+      }
     });
     
-    // Setup keyboard navigation
-    setupKeyboardNavigation();
+    console.log("[DEBUG] Final PR list HTML:", prListElement.innerHTML);
+    
+    // Delay to ensure DOM is updated before setting up keyboard navigation
+    setTimeout(() => {
+      // Setup keyboard navigation
+      setupKeyboardNavigation();
+      console.log("[DEBUG] Keyboard navigation setup complete");
+    }, 100);
   }
   
   // Get formatted time ago string
