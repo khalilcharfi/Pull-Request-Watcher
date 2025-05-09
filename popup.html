@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>PR Tracker</title>
+  <title>PR Tracker - Pull Request Manager</title>
   <style>
     :root {
       --bg-color: #f9fafb;
@@ -53,30 +53,45 @@
       background-color: var(--bg-color);
       color: var(--text-primary);
       line-height: 1.4;
+      margin: 0;
     }
     
     .container {
       width: 340px;
       max-height: 480px;
-      overflow: auto;
-      padding: 8px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+    
+    #app {
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+      overflow: hidden;
+    }
+    
+    #pr-list {
+      overflow-y: auto;
+      flex: 1;
+      padding: 0 8px 8px;
     }
     
     /* Improved scrollbar for better UX */
-    .container::-webkit-scrollbar {
+    #pr-list::-webkit-scrollbar {
       width: 6px;
     }
     
-    .container::-webkit-scrollbar-track {
+    #pr-list::-webkit-scrollbar-track {
       background: transparent;
     }
     
-    .container::-webkit-scrollbar-thumb {
+    #pr-list::-webkit-scrollbar-thumb {
       background-color: rgba(0, 0, 0, 0.1);
       border-radius: 10px;
     }
     
-    .container::-webkit-scrollbar-thumb:hover {
+    #pr-list::-webkit-scrollbar-thumb:hover {
       background-color: rgba(0, 0, 0, 0.2);
     }
     
@@ -769,8 +784,11 @@
   </style>
 </head>
 <body>
-  <div id="app" class="container">
-    <div id="pr-list"></div>
+  <div class="container">
+    <div id="app">
+      <!-- The header will be created dynamically in JS -->
+      <div id="pr-list"></div>
+    </div>
   </div>
   
   <div id="loading-overlay" class="loading-overlay">

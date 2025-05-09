@@ -125,20 +125,43 @@ document.addEventListener('DOMContentLoaded', () => {
     // Create header
     const header = document.createElement('header');
     header.className = 'header';
+    header.style.position = 'sticky';
+    header.style.top = '0';
+    header.style.zIndex = '100';
+    header.style.backgroundColor = 'var(--bg-color)';
+    header.style.borderBottom = '1px solid var(--border-color)';
+    header.style.padding = '8px 8px 6px';
+    header.style.boxShadow = '0 2px 4px rgba(0, 0, 0, 0.05)';
     
     // Create logo container
     const logoContainer = document.createElement('div');
     logoContainer.className = 'logo-container';
+    logoContainer.style.display = 'flex';
+    logoContainer.style.alignItems = 'center';
+    logoContainer.style.justifyContent = 'space-between';
+    logoContainer.style.marginBottom = '8px';
     
     // Add logo
     const logo = document.createElement('div');
     logo.className = 'logo';
+    logo.style.display = 'flex';
+    logo.style.alignItems = 'center';
+    logo.style.gap = '6px';
+    logo.style.color = 'var(--primary-blue)';
+    logo.style.fontWeight = '600';
+    logo.style.fontSize = '14px';
     logo.innerHTML = `${ICONS.logo} <span>PR Tracker</span>`;
     
     // Status indicator
     const statusIndicator = document.createElement('div');
     statusIndicator.id = 'status-indicator';
     statusIndicator.className = 'status-indicator hidden';
+    statusIndicator.style.backgroundColor = 'rgba(16, 185, 129, 0.1)';
+    statusIndicator.style.color = 'var(--success-green)';
+    statusIndicator.style.padding = '3px 6px';
+    statusIndicator.style.borderRadius = '4px';
+    statusIndicator.style.fontSize = '11px';
+    statusIndicator.style.transition = 'opacity 0.3s ease';
     statusIndicator.textContent = 'Updated';
     
     logoContainer.appendChild(logo);
@@ -147,29 +170,32 @@ document.addEventListener('DOMContentLoaded', () => {
     // Create search and filter section
     const searchBar = document.createElement('div');
     searchBar.className = 'search-bar';
+    searchBar.style.display = 'flex';
+    searchBar.style.gap = '6px';
+    searchBar.style.marginBottom = '8px';
     
     // Search input
     searchBar.innerHTML = `
-      <div class="search-input">
+      <div class="search-input" style="position: relative; flex-grow: 1;">
         ${ICONS.search}
-        <input type="text" id="search-input" placeholder="Search PRs..." aria-label="Search pull requests" disabled>
+        <input type="text" id="search-input" placeholder="Search PRs..." aria-label="Search pull requests" disabled style="width: 100%; padding: 3px 3px 3px 22px; border: 1px solid var(--border-color); border-radius: var(--radius-sm); font-size: 11px; height: 28px;">
       </div>
-      <div class="filter-controls">
-        <button id="filter-button" class="filter-button" aria-label="Filter options" title="Filter options" disabled>
+      <div class="filter-controls" style="position: relative;">
+        <button id="filter-button" class="filter-button" aria-label="Filter options" title="Filter options" disabled style="background-color: var(--card-bg); color: var(--text-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 3px 6px; font-size: 11px; cursor: pointer; display: flex; align-items: center; justify-content: center; height: 28px;">
           ${ICONS.filter}
         </button>
-        <div id="filter-dropdown" class="filter-dropdown hidden">
-          <label class="filter-option">
-            <input type="checkbox" id="show-approved" checked>
+        <div id="filter-dropdown" class="filter-dropdown hidden" style="position: absolute; right: 0; top: 100%; background-color: var(--card-bg); border-radius: var(--radius-md); box-shadow: var(--shadow-md); z-index: 20; min-width: 130px; padding: 4px; margin-top: 4px; border: 1px solid var(--border-color);">
+          <label class="filter-option" style="display: flex; align-items: center; padding: 6px; cursor: pointer; border-radius: var(--radius-sm);">
+            <input type="checkbox" id="show-approved" checked style="margin-right: 8px;">
             <span>Show approved</span>
           </label>
-          <label class="filter-option">
-            <input type="checkbox" id="show-pending" checked>
+          <label class="filter-option" style="display: flex; align-items: center; padding: 6px; cursor: pointer; border-radius: var(--radius-sm);">
+            <input type="checkbox" id="show-pending" checked style="margin-right: 8px;">
             <span>Show pending</span>
           </label>
         </div>
       </div>
-      <button id="refresh-button" class="refresh-button" aria-label="Refresh PR list" title="Refresh PR list">
+      <button id="refresh-button" class="refresh-button" aria-label="Refresh PR list" title="Refresh PR list" style="background-color: var(--card-bg); color: var(--text-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-sm); width: 28px; height: 28px; font-size: 11px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.15s ease;">
         ${ICONS.refresh}
       </button>
     `;
@@ -181,6 +207,11 @@ document.addEventListener('DOMContentLoaded', () => {
     // Add stats counter
     const statsBar = document.createElement('div');
     statsBar.className = 'stats-bar';
+    statsBar.style.display = 'flex';
+    statsBar.style.justifyContent = 'space-between';
+    statsBar.style.fontSize = '11px';
+    statsBar.style.color = 'var(--text-secondary)';
+    statsBar.style.padding = '4px 0';
     statsBar.innerHTML = '<span id="pr-count"></span>';
     header.appendChild(statsBar);
     
@@ -272,9 +303,11 @@ document.addEventListener('DOMContentLoaded', () => {
           refreshButton.classList.remove('rotating');
           hideLoadingOverlay();
           
-          // Show status indicator briefly
+          // Show status indicator with updated message
+          statusIndicator.style.backgroundColor = 'rgba(16, 185, 129, 0.1)';
+          statusIndicator.style.color = 'var(--success-green)';
+          statusIndicator.textContent = 'PR removed permanently';
           statusIndicator.classList.remove('hidden');
-          statusIndicator.textContent = 'Updated';
           
           // Add timestamp to status indicator
           const now = new Date();
@@ -282,7 +315,12 @@ document.addEventListener('DOMContentLoaded', () => {
           state.lastUpdated = timeString;
           
           setTimeout(() => {
-            statusIndicator.classList.add('hidden');
+            // Fade out status indicator
+            statusIndicator.style.opacity = '0';
+            setTimeout(() => {
+              statusIndicator.classList.add('hidden');
+              statusIndicator.style.opacity = '1';
+            }, 300);
           }, 2000);
         });
       });
@@ -343,14 +381,45 @@ document.addEventListener('DOMContentLoaded', () => {
           safeSendMessage({
             action: "removePR",
             prId: prId
-          }, () => {
-            // Remove item from UI
-            const prItemToRemove = document.querySelector(`.pr-item[data-pr-id="${prId}"]`);
-            if (prItemToRemove) prItemToRemove.remove();
-            
-            // Update the PR count in the UI
-            state.prs = state.prs.filter(pr => pr.id !== prId);
-            renderFilteredPRs();
+          }, (response) => {
+            if (response && response.success) {
+              // Remove item from UI
+              const prItemToRemove = document.querySelector(`.pr-item[data-pr-id="${prId}"]`);
+              if (prItemToRemove) prItemToRemove.remove();
+              
+              // Update the PR count in the UI
+              state.prs = state.prs.filter(pr => pr.id !== prId);
+              renderFilteredPRs();
+              
+              // Show a brief success message
+              const statusIndicator = document.getElementById('status-indicator');
+              if (statusIndicator) {
+                statusIndicator.style.backgroundColor = 'rgba(16, 185, 129, 0.1)';
+                statusIndicator.style.color = 'var(--success-green)';
+                statusIndicator.textContent = 'PR removed permanently';
+                statusIndicator.classList.remove('hidden');
+                
+                setTimeout(() => {
+                  // Fade out status indicator
+                  statusIndicator.style.opacity = '0';
+                  setTimeout(() => {
+                    statusIndicator.classList.add('hidden');
+                    statusIndicator.style.opacity = '1';
+                  }, 300);
+                }, 2000);
+              }
+              
+              // Also ensure it's removed from any cache by refreshing
+              // the PR stats silently in the background
+              setTimeout(() => {
+                safeSendMessage({ action: "getAllPRStats" }, () => {
+                  console.log("Updated PR data after removal");
+                });
+              }, 500);
+            } else {
+              // Show error if removal failed
+              console.error("Failed to remove PR:", response?.error);
+            }
             
             // Hide the overlay
             hideLoadingOverlay();
@@ -579,6 +648,8 @@ document.addEventListener('DOMContentLoaded', () => {
         prItem.style.backgroundColor = 'white';
         prItem.style.border = '1px solid #e5e7eb';
         prItem.style.borderRadius = '4px';
+        prItem.style.minWidth = '0';
+        prItem.style.overflow = 'hidden';
         
         // Handle project truncation for long names
         let displayProject = pr.displayProject || pr.project || 'Unknown';
@@ -598,8 +669,8 @@ document.addEventListener('DOMContentLoaded', () => {
         // Build HTML with optimized rendering
         try {
           prItem.innerHTML = `
-            <div class="pr-info" style="flex: 1;">
-              <div class="pr-title" title="${defaultTitle}" style="font-weight: 500; margin-bottom: 4px;">${defaultTitle}</div>
+            <div class="pr-info" style="flex: 1; min-width: 0; overflow: hidden;">
+              <div class="pr-title" title="${defaultTitle}" style="font-weight: 500; margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${defaultTitle}</div>
               <div class="pr-project" title="${pr.project || 'Unknown'}/${pr.repo || 'Unknown'}" style="font-size: 11px; color: var(--text-secondary); margin-bottom: 4px;">
                 ${ICONS.folder} ${displayProject}/${displayRepo}
               </div>
@@ -613,7 +684,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 </span>
               </div>
             </div>
-            <div class="pr-stats" style="display: flex; gap: 10px; align-items: center;">
+            <div class="pr-stats" style="display: flex; gap: 14px; align-items: center; margin-left: 10px; flex-shrink: 0;">
               <div class="stat" title="Views" style="display: flex; align-items: center;">
                 ${ICONS.visibility}
                 <span style="margin-left: 3px;">${pr.viewCount || 0}</span>
@@ -622,9 +693,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 ${ICONS.thumb_up}
                 <span style="margin-left: 3px;">${pr.approvalCount || 0}</span>
               </div>
-              <button class="remove-btn" data-pr-id="${pr.id}" title="Remove from history" style="background: none; border: none; cursor: pointer; color: var(--text-tertiary);">${ICONS.close}</button>
-            </div>
-          `;
+              <button class="remove-btn" data-pr-id="${pr.id}" title="Remove from history" style="background: none; border: none; cursor: pointer; color: var(--text-tertiary); padding: 6px; border-radius: 4px; display: flex; align-items: center; justify-content: center; min-width: 24px; transition: all 0.2s ease-in-out;" onmouseover="this.style.backgroundColor='#f3f4f6'; this.style.color='var(--danger-red)';" onmouseout="this.style.backgroundColor='transparent'; this.style.color='var(--text-tertiary)';">${ICONS.close}</button>
+            </div>`;
           
           console.log(`[DEBUG] PR ${index} HTML generated`);
         } catch (err) {
