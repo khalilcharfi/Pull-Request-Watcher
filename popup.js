@@ -10,6 +10,8 @@ document.addEventListener('DOMContentLoaded', () => {
   // Safe wrapper for browser API calls
   const safeSendMessage = (message, callback) => {
     try {
+      console.log("[DEBUG] Sending message to background:", message);
+      
       // Add an error handler to catch potential connection issues
       const handleError = (err) => {
         console.error("Error sending message:", err);
@@ -22,6 +24,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // Firefox uses promises
         browser.runtime.sendMessage(message)
           .then(response => {
+            console.log("[DEBUG] Firefox response received:", response);
             if (callback && typeof callback === 'function') {
               callback(response);
             }
@@ -34,8 +37,11 @@ document.addEventListener('DOMContentLoaded', () => {
           const lastError = chrome.runtime.lastError;
           if (lastError) {
             handleError(lastError);
-          } else if (callback && typeof callback === 'function') {
-            callback(response);
+          } else {
+            console.log("[DEBUG] Chrome response received:", response);
+            if (callback && typeof callback === 'function') {
+              callback(response);
+            }
           }
         });
       }
@@ -61,8 +67,19 @@ document.addEventListener('DOMContentLoaded', () => {
                 <p>Connection error</p>
                 <p class="empty-subtitle">Could not connect to extension background service</p>
                 <p class="empty-subtitle">Try refreshing the popup</p>
+                <button id="debug-btn" style="margin-top:15px;padding:8px 15px;background-color:var(--primary-blue);color:white;border:none;border-radius:4px;cursor:pointer;">
+                  Debug Storage
+                </button>
               </div>
             `;
+            
+            // Add event listener to the debug button
+            setTimeout(() => {
+              const debugBtn = document.getElementById('debug-btn');
+              if (debugBtn) {
+                debugBtn.addEventListener('click', debugStorage);
+              }
+            }, 100);
           }
         }, 3000);
       }
@@ -201,6 +218,23 @@ document.addEventListener('DOMContentLoaded', () => {
     createAppStructure();
     setupEventListeners();
     showLoadingOverlay('Loading PRs...');
+    
+    // Add a manual debug button to the header
+    const headerEl = document.querySelector('.header');
+    if (headerEl) {
+      const debugButton = document.createElement('button');
+      debugButton.textContent = 'Debug Storage';
+      debugButton.style.marginLeft = '10px';
+      debugButton.style.padding = '4px 8px';
+      debugButton.style.fontSize = '10px';
+      debugButton.style.backgroundColor = 'var(--primary-blue)';
+      debugButton.style.color = 'white';
+      debugButton.style.border = 'none';
+      debugButton.style.borderRadius = '4px';
+      debugButton.style.cursor = 'pointer';
+      debugButton.addEventListener('click', debugStorage);
+      headerEl.appendChild(debugButton);
+    }
     
     // First check if the background script is alive
     pingBackgroundScript(() => {
@@ -451,7 +485,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
   
-  // Render list of PRs
+  // Render list of PRs - fixed function to ensure items are displayed properly
   function renderPRList({ prs }) {
     console.log("[DEBUG] renderPRList called with:", prs);
     
@@ -470,9 +504,62 @@ document.addEventListener('DOMContentLoaded', () => {
         ${ICONS.no_data}
         <p>No pull requests to display</p>
         <p class="empty-subtitle">Review a PR on Bitbucket to start tracking</p>
+        <button id="create-test-pr" style="margin-top:15px;padding:8px 15px;background-color:var(--primary-blue);color:white;border:none;border-radius:4px;cursor:pointer;">
+          Create Test PR
+        </button>
       `;
       prListElement.appendChild(emptyState);
+      
+      // Add listener to create test PR button
+      setTimeout(() => {
+        const createTestBtn = document.getElementById('create-test-pr');
+        if (createTestBtn) {
+          createTestBtn.addEventListener('click', createTestPR);
+        }
+      }, 100);
+      
       return;
+    }
+    
+    // Function to create test PR data for debugging
+    function createTestPR() {
+      const testPR = {
+        id: 'pr-123',
+        prNumber: '123',
+        title: 'Test Pull Request',
+        project: 'test-project',
+        repo: 'test-repo',
+        displayProject: 'Test Project',
+        displayRepo: 'Test Repo',
+        url: 'https://bitbucket.org/test-project/test-repo/pull-requests/123',
+        status: 'open',
+        isApprovedByMe: false,
+        lastVisited: Date.now(),
+        viewCount: 1,
+        approvalCount: 0
+      };
+      
+      // Add test PR to state
+      state.prs = [testPR];
+      
+      // Store in local storage for persistence
+      browserAPI.storage.local.set({
+        'pr-123': { reviewCount: 1, approvalCount: 0, lastReviewed: Date.now() },
+        'pr-info-pr-123': testPR
+      }, () => {
+        console.log("[DEBUG] Test PR created successfully");
+        
+        // Update PR cache
+        browserAPI.storage.local.set({ 
+          'pr_data_cache': {
+            timestamp: Date.now(),
+            data: { 'pr-123': testPR }
+          }
+        });
+        
+        // Render the list with the test PR
+        renderFilteredPRs();
+      });
     }
     
     // Enable filter controls when we have data
@@ -526,6 +613,9 @@ document.addEventListener('DOMContentLoaded', () => {
         prItem.style.padding = '10px';
         prItem.style.marginBottom = '8px';
         prItem.style.justifyContent = 'space-between';
+        prItem.style.backgroundColor = 'white';
+        prItem.style.border = '1px solid #e5e7eb';
+        prItem.style.borderRadius = '4px';
         
         // Handle project truncation for long names
         let displayProject = pr.displayProject || pr.project || 'Unknown';
@@ -930,7 +1020,77 @@ document.addEventListener('DOMContentLoaded', () => {
               });
               
               storageInfo.appendChild(useManualBtn);
+            } else {
+              // Option to create a test PR
+              const createTestBtn = document.createElement('button');
+              createTestBtn.textContent = 'Create Test PR';
+              createTestBtn.style.marginTop = '10px';
+              createTestBtn.style.padding = '8px 15px';
+              createTestBtn.style.backgroundColor = 'var(--primary-blue)';
+              createTestBtn.style.color = 'white';
+              createTestBtn.style.border = 'none';
+              createTestBtn.style.borderRadius = '4px';
+              createTestBtn.style.cursor = 'pointer';
+              
+              createTestBtn.addEventListener('click', function() {
+                const testPR = {
+                  title: 'Test Pull Request',
+                  project: 'test-project',
+                  repo: 'test-repo',
+                  displayProject: 'Test Project',
+                  displayRepo: 'Test Repo',
+                  url: 'https://bitbucket.org/test-project/test-repo/pull-requests/123',
+                  status: 'open',
+                  isApprovedByMe: false,
+                  lastVisited: Date.now(),
+                  viewCount: 1,
+                  approvalCount: 0
+                };
+                
+                browserAPI.storage.local.set({
+                  'pr-123': { reviewCount: 1, approvalCount: 0, lastReviewed: Date.now() },
+                  'pr-info-pr-123': testPR
+                }, () => {
+                  alert('Test PR created! Reload the popup to see it.');
+                });
+              });
+              
+              storageInfo.appendChild(createTestBtn);
             }
+          } else {
+            // No PR entries found, offer to create test data
+            const createTestBtn = document.createElement('button');
+            createTestBtn.textContent = 'Create Test PR';
+            createTestBtn.style.marginTop = '10px';
+            createTestBtn.style.padding = '8px 15px';
+            createTestBtn.style.backgroundColor = 'var(--primary-blue)';
+            createTestBtn.style.color = 'white';
+            createTestBtn.style.border = 'none';
+            createTestBtn.style.borderRadius = '4px';
+            createTestBtn.style.cursor = 'pointer';
+            
+            createTestBtn.addEventListener('click', function() {
+              const testPR = {
+                title: 'Test Pull Request',
+                project: 'test-project',
+                repo: 'test-repo',
+                displayProject: 'Test Project',
+                displayRepo: 'Test Repo',
+                url: 'https://bitbucket.org/test-project/test-repo/pull-requests/123',
+                status: 'open',
+                isApprovedByMe: false,
+                lastVisited: Date.now()
+              };
+              
+              browserAPI.storage.local.set({
+                'pr-123': { reviewCount: 1, approvalCount: 0, lastReviewed: Date.now() },
+                'pr-info-pr-123': testPR
+              }, () => {
+                alert('Test PR created! Reload the popup to see it.');
+              });
+            });
+            
+            storageInfo.appendChild(createTestBtn);
           }
           
           // Get the PR list or empty state container
@@ -940,7 +1100,29 @@ document.addEventListener('DOMContentLoaded', () => {
           }
         } else {
           console.log("[DEBUG] No data found in storage");
-          alert("No data found in storage");
+          alert("No data found in storage. Want to create a test PR?");
+          
+          // Create test PR option
+          const testPR = {
+            title: 'Test Pull Request',
+            project: 'test-project',
+            repo: 'test-repo',
+            displayProject: 'Test Project',
+            displayRepo: 'Test Repo',
+            url: 'https://bitbucket.org/test-project/test-repo/pull-requests/123',
+            status: 'open',
+            isApprovedByMe: false,
+            lastVisited: Date.now()
+          };
+          
+          if (confirm("Create a test PR for debugging?")) {
+            browserAPI.storage.local.set({
+              'pr-123': { reviewCount: 1, approvalCount: 0, lastReviewed: Date.now() },
+              'pr-info-pr-123': testPR
+            }, () => {
+              alert('Test PR created! Reload the popup to see it.');
+            });
+          }
         }
       });
     } catch (err) {
