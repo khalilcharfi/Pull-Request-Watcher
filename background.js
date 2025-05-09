@@ -275,8 +275,25 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
     case "removePR":
       if (message.prId) {
         const prInfoKey = `pr-info-${message.prId}`;
-        browserAPI.storage.local.remove([message.prId, prInfoKey], () => {
-          sendResponse({ success: true });
+        // First, get and update the cache to ensure the PR is removed from there too
+        browserAPI.storage.local.get(['pr_data_cache'], (result) => {
+          const cache = result.pr_data_cache || { timestamp: Date.now(), data: {} };
+          
+          // Remove the PR from cache if it exists
+          if (cache.data && cache.data[message.prId]) {
+            delete cache.data[message.prId];
+            
+            // Update the cache
+            browserAPI.storage.local.set({ 'pr_data_cache': cache }, () => {
+              console.log(`Removed PR ${message.prId} from cache`);
+            });
+          }
+          
+          // Then remove the actual PR data and info
+          browserAPI.storage.local.remove([message.prId, prInfoKey], () => {
+            console.log(`Permanently removed PR ${message.prId} from storage`);
+            sendResponse({ success: true });
+          });
         });
       } else {
         sendResponse({ success: false, error: "Invalid PR ID" });
