@@ -28,7 +28,18 @@
           });
       } else {
         // Handle callback-based API (Chrome)
-        // Chrome's sendMessage uses callbacks, not promises
+        browserAPI.runtime.sendMessage(message, (response) => {
+          // Check for runtime error
+          const lastError = browserAPI.runtime.lastError;
+          if (lastError) {
+            console.log("Error sending message:", lastError);
+            if (callback && typeof callback === 'function') {
+              callback({ success: false, error: lastError.message });
+            }
+          } else if (callback && typeof callback === 'function') {
+            callback(response);
+          }
+        });
       }
     } catch (err) {
       console.log("Error sending message:", err);
@@ -104,6 +115,9 @@
       }
     }
     
+    // Get current approvals count
+    const totalApprovals = getTotalApprovals();
+    
     // Create base PR info - viewCount will be retrieved from storage later if available
     return {
       prNumber, 
@@ -122,7 +136,8 @@
       lastVisited: Date.now(),
       viewCount: 0, // This will be updated with the stored value if available
       commentCount: getCommentCount(),
-      totalApprovals: getTotalApprovals()
+      totalApprovals: totalApprovals,
+      allReviewers: getTotalReviewers()
     };
   };
   
@@ -138,6 +153,7 @@
   
   // Get the total number of approvals on the PR
   const getTotalApprovals = () => {
+    // First try using the cached count element if available
     if (!cachedElements.approveCountEl) {
       cachedElements.approveCountEl = document.querySelector('[data-test-id="approve-count"]');
     }
@@ -145,6 +161,29 @@
     if (cachedElements.approveCountEl) {
       const count = parseInt(cachedElements.approveCountEl.textContent.match(/\d+/)?.[0] || '0', 10);
       return isNaN(count) ? 0 : count;
+    }
+    
+    // Look for the reviewer section with approval indicators
+    const reviewerSection = document.querySelector('section[aria-label="Review status"]');
+    if (reviewerSection) {
+      // Look for approved reviewer indicators (green checkmarks)
+      const approvedReviewers = reviewerSection.querySelectorAll('span[aria-label="Approved"]');
+      if (approvedReviewers.length > 0) {
+        return approvedReviewers.length;
+      }
+      
+      // Alternative method: look for the green success circles in the reviewer list
+      const approvalIcons = reviewerSection.querySelectorAll('svg circle[fill*="#22A06B"], [style*="--ds-icon-success"], [style*="var(--ds-icon-success"]');
+      if (approvalIcons.length > 0) {
+        return approvalIcons.length;
+      }
+      
+      // Look for reviewer count text and approved count
+      const reviewerCountText = reviewerSection.textContent.match(/(\d+)\s+reviewers?/i);
+      const approvedCount = (reviewerSection.textContent.match(/approved/gi) || []).length;
+      if (approvedCount > 0) {
+        return approvedCount;
+      }
     }
     
     // Fallback method: Count approval badges or approver avatars
@@ -157,6 +196,27 @@
       cachedElements.approverAvatars = document.querySelectorAll('[data-testid="approvers-avatar-list"] img');
     }
     if (cachedElements.approverAvatars.length > 0) return cachedElements.approverAvatars.length;
+    
+    return 0;
+  };
+
+  // Get the total number of reviewers
+  const getTotalReviewers = () => {
+    // Look for the reviewer section
+    const reviewerSection = document.querySelector('section[aria-label="Review status"]');
+    if (reviewerSection) {
+      // Try to find the reviewers count from header text
+      const reviewerCountText = reviewerSection.textContent.match(/(\d+)\s+reviewers?/i);
+      if (reviewerCountText && reviewerCountText[1]) {
+        return parseInt(reviewerCountText[1], 10);
+      }
+      
+      // Count reviewer avatars as fallback
+      const reviewerAvatars = reviewerSection.querySelectorAll('[aria-label^="More information about"]');
+      if (reviewerAvatars.length > 0) {
+        return reviewerAvatars.length;
+      }
+    }
     
     return 0;
   };
@@ -677,9 +737,9 @@
               ${eyeIcon}
               <span>${viewCount}</span>
             </div>
-            <div class="stat" title="Approvals">
+            <div class="stat" title="${prInfo.allReviewers > 0 ? `Approvals (${prInfo.totalApprovals}/${prInfo.allReviewers})` : 'Approvals'}">
               ${thumbUpIcon}
-              <span>${prInfo.totalApprovals || 0}</span>
+              <span>${prInfo.totalApprovals > 0 ? `${prInfo.totalApprovals}${prInfo.allReviewers > 0 ? '/' + prInfo.allReviewers : ''}` : '0'}</span>
             </div>
             ${approved ? `<div class="divider"></div>${checkCircleIcon}` : ''}
             ${statusLabel}
@@ -736,8 +796,12 @@
       pullRequestId: prInfo.prNumber
     });
     
+    // Check if this PR has been viewed in this session
+    const sessionKey = `pr-visited-${prInfo.storageKey}`;
+    const hasVisitedThisSession = sessionStorage.getItem(sessionKey) === 'true';
+    
     // If the PR is already processed in this session, don't count it as a new view
-    if (isProcessed) return true;
+    if (isProcessed || hasVisitedThisSession) return true;
     
     // Skip processing if PR number is missing
     if (!prInfo.prNumber) {
@@ -753,6 +817,9 @@
     
     isProcessed = true;
     currentPrId = prInfo.storageKey;
+    
+    // Mark this PR as visited in this session
+    sessionStorage.setItem(sessionKey, 'true');
     
     // Use promise-based storage to prevent callback hell and improve consistency
     const storagePromise = new Promise((resolve) => {
@@ -821,7 +888,7 @@
       // Only increment view if coming from user navigation, not from cache refresh
       if (!fromCache) {
         // Send message to increment view count
-        browserAPI.runtime.sendMessage({
+        safeSendMessage({
           action: "updatePRStats",
           prId: prInfo.storageKey,
           prInternalId: prInfo.internalId,
@@ -1209,12 +1276,19 @@
       updateStatsBadge();
       
       // Send updated stats to background - don't increment view count here (shouldIncrementView: false)
-      browserAPI.runtime.sendMessage({
+      safeSendMessage({
         action: "updatePRStats",
         prId: currentPrId,
         prInternalId: prInfo.internalId,
         isApproval: prInfo.isApprovedByMe,
         shouldIncrementView: false // Don't increment on updates, only on first visit
+      }, (response) => { 
+        if (response && response.success) {
+          updateStatsBadge();
+          if (DEBUG) console.log("PR Tracker: Successfully updated PR stats", response.stats);
+        } else {
+          if (DEBUG) console.log("PR Tracker: Failed to update PR stats", response);
+        }
       });
     });
   };
@@ -1247,6 +1321,9 @@
   };
 
   const setupApprovalMonitoring = () => {
+    // Track the last known approval state to prevent duplicate updates
+    let lastKnownApprovalState = null;
+    
     // Monitor clicks on the Approve button
     document.addEventListener('click', (e) => {
       // Only monitor specific approve/unapprove buttons
@@ -1257,6 +1334,21 @@
       setTimeout(() => {
         const isApproved = isCurrentUserApproved();
         
+        // If approval state hasn't changed, don't send update
+        if (lastKnownApprovalState === isApproved) {
+          console.log("PR Tracker: Approval state unchanged, skipping update");
+          return;
+        }
+        
+        // Update the last known state
+        lastKnownApprovalState = isApproved;
+        
+        // Also track the approval state in session storage to prevent duplicate tracking
+        // across page refreshes
+        if (currentPrId) {
+          sessionStorage.setItem(`pr-approved-${currentPrId}`, isApproved ? 'true' : 'false');
+        }
+        
         // Update PR info with new approval status
         if (currentPrId) {
           const prInfo = getPRInfo();
@@ -1264,12 +1356,15 @@
             prInfo.isApprovedByMe = isApproved;
             browserAPI.storage.local.get([`pr-info-${currentPrId}`], (result) => {
               const existingInfo = result[`pr-info-${currentPrId}`] || {};
-              browserAPI.storage.local.set({ 
-                [`pr-info-${currentPrId}`]: {
-                  ...existingInfo,
-                  isApprovedByMe: isApproved
-                }
-              });
+              // Only update if the approval state has actually changed
+              if (existingInfo.isApprovedByMe !== isApproved) {
+                browserAPI.storage.local.set({ 
+                  [`pr-info-${currentPrId}`]: {
+                    ...existingInfo,
+                    isApprovedByMe: isApproved
+                  }
+                });
+              }
             });
           }
           
@@ -1278,15 +1373,17 @@
           
           // If the user has approved the PR, update the stats with an approval count increment
           if (isApproved) {
-            browserAPI.runtime.sendMessage({
+            safeSendMessage({
               action: "updatePRStats",
               prId: currentPrId,
               isApproval: true,
-              totalApprovals
+              totalApprovals,
+              // Add a timestamp to prevent double-counting of approvals
+              approvalTimestamp: Date.now()
             }, () => updateStatsBadge());
           } else {
             // Update with new approval count even if unapproved
-            browserAPI.runtime.sendMessage({
+            safeSendMessage({
               action: "updatePRStats",
               prId: currentPrId,
               isApproval: false,
@@ -1296,6 +1393,18 @@
         }
       }, 750); // Reduced wait time for more responsive updates
     }, { passive: true });
+    
+    // Initialize the last known approval state on page load
+    if (currentPrId) {
+      const savedState = sessionStorage.getItem(`pr-approved-${currentPrId}`);
+      if (savedState !== null) {
+        lastKnownApprovalState = savedState === 'true';
+      } else {
+        // If no saved state, check the current state
+        lastKnownApprovalState = isCurrentUserApproved();
+        sessionStorage.setItem(`pr-approved-${currentPrId}`, lastKnownApprovalState ? 'true' : 'false');
+      }
+    }
   };
 
   const setupMessageListener = () => {
