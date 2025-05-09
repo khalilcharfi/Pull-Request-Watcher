@@ -67,19 +67,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 <p>Connection error</p>
                 <p class="empty-subtitle">Could not connect to extension background service</p>
                 <p class="empty-subtitle">Try refreshing the popup</p>
-                <button id="debug-btn" style="margin-top:15px;padding:8px 15px;background-color:var(--primary-blue);color:white;border:none;border-radius:4px;cursor:pointer;">
-                  Debug Storage
-                </button>
               </div>
             `;
-            
-            // Add event listener to the debug button
-            setTimeout(() => {
-              const debugBtn = document.getElementById('debug-btn');
-              if (debugBtn) {
-                debugBtn.addEventListener('click', debugStorage);
-              }
-            }, 100);
           }
         }, 3000);
       }
@@ -218,23 +207,6 @@ document.addEventListener('DOMContentLoaded', () => {
     createAppStructure();
     setupEventListeners();
     showLoadingOverlay('Loading PRs...');
-    
-    // Add a manual debug button to the header
-    const headerEl = document.querySelector('.header');
-    if (headerEl) {
-      const debugButton = document.createElement('button');
-      debugButton.textContent = 'Debug Storage';
-      debugButton.style.marginLeft = '10px';
-      debugButton.style.padding = '4px 8px';
-      debugButton.style.fontSize = '10px';
-      debugButton.style.backgroundColor = 'var(--primary-blue)';
-      debugButton.style.color = 'white';
-      debugButton.style.border = 'none';
-      debugButton.style.borderRadius = '4px';
-      debugButton.style.cursor = 'pointer';
-      debugButton.addEventListener('click', debugStorage);
-      headerEl.appendChild(debugButton);
-    }
     
     // First check if the background script is alive
     pingBackgroundScript(() => {
@@ -504,20 +476,8 @@ document.addEventListener('DOMContentLoaded', () => {
         ${ICONS.no_data}
         <p>No pull requests to display</p>
         <p class="empty-subtitle">Review a PR on Bitbucket to start tracking</p>
-        <button id="create-test-pr" style="margin-top:15px;padding:8px 15px;background-color:var(--primary-blue);color:white;border:none;border-radius:4px;cursor:pointer;">
-          Create Test PR
-        </button>
       `;
       prListElement.appendChild(emptyState);
-      
-      // Add listener to create test PR button
-      setTimeout(() => {
-        const createTestBtn = document.getElementById('create-test-pr');
-        if (createTestBtn) {
-          createTestBtn.addEventListener('click', createTestPR);
-        }
-      }, 100);
-      
       return;
     }
     
@@ -594,14 +554,17 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Create PR items
     sortedPRs.forEach((pr, index) => {
-      // Skip empty or invalid PRs
-      if (!pr || !pr.title) {
-        console.log("[DEBUG] Skipping invalid PR:", pr);
+      // Skip completely invalid PRs, but allow null titles
+      if (!pr) {
+        console.log("[DEBUG] Skipping null PR entry");
         return;
       }
       
       try {
-        console.log(`[DEBUG] Rendering PR ${index}:`, pr.title);
+        console.log(`[DEBUG] Rendering PR ${index}:`, pr);
+        
+        // Generate a fallback title from PR info if title is missing
+        const defaultTitle = pr.title || `PR #${pr.prNumber || pr.id.replace('pr-', '')} (${pr.project || 'Unknown'}/${pr.repo || 'Unknown'})`;
         
         const prItem = document.createElement('div');
         prItem.className = `pr-item ${pr.status || 'open'} ${pr.isApprovedByMe ? 'approved' : 'pending'}`;
@@ -636,13 +599,13 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
           prItem.innerHTML = `
             <div class="pr-info" style="flex: 1;">
-              <div class="pr-title" title="${pr.title || 'Untitled PR'}" style="font-weight: 500; margin-bottom: 4px;">${pr.title || 'Untitled PR'}</div>
+              <div class="pr-title" title="${defaultTitle}" style="font-weight: 500; margin-bottom: 4px;">${defaultTitle}</div>
               <div class="pr-project" title="${pr.project || 'Unknown'}/${pr.repo || 'Unknown'}" style="font-size: 11px; color: var(--text-secondary); margin-bottom: 4px;">
                 ${ICONS.folder} ${displayProject}/${displayRepo}
               </div>
               <div class="pr-meta" style="font-size: 10px; color: var(--text-secondary); display: flex; gap: 6px;">
                 <span class="pr-number" title="PR #${pr.prNumber || 'unknown'}">
-                  #${pr.prNumber || 'unknown'}
+                  #${pr.prNumber || pr.id.replace('pr-', '') || 'unknown'}
                 </span>
                 ${pr.status && pr.status !== 'open' ? `<span class="pr-status ${pr.status}">${pr.status}</span>` : ''}
                 <span class="pr-time" title="Last visited: ${new Date(pr.lastVisited || 0).toLocaleString()}">
@@ -666,7 +629,7 @@ document.addEventListener('DOMContentLoaded', () => {
           console.log(`[DEBUG] PR ${index} HTML generated`);
         } catch (err) {
           console.error("[DEBUG] Error generating PR HTML:", err);
-          prItem.textContent = `Error rendering PR: ${pr.title || 'Unknown'}`;
+          prItem.textContent = `Error rendering PR: ${defaultTitle}`;
         }
         
         // Explicitly append to prContainer
@@ -803,19 +766,8 @@ document.addEventListener('DOMContentLoaded', () => {
               ${ICONS.no_data}
               <p>Connection timed out</p>
               <p class="empty-subtitle">Please try again</p>
-              <button id="debug-storage-btn" style="margin-top:15px;padding:8px 15px;background-color:var(--primary-blue);color:white;border:none;border-radius:4px;cursor:pointer;">
-                Debug Storage
-              </button>
             </div>
           `;
-          
-          // Add event listener to the debug button
-          setTimeout(() => {
-            const debugBtn = document.getElementById('debug-storage-btn');
-            if (debugBtn) {
-              debugBtn.addEventListener('click', debugStorage);
-            }
-          }, 100);
         }
         
         if (typeof callback === 'function') {
@@ -951,183 +903,6 @@ document.addEventListener('DOMContentLoaded', () => {
           callback();
         }
       });
-    }
-  }
-  
-  // Function to directly debug what's in storage
-  function debugStorage() {
-    console.log("[DEBUG] Attempting to directly access storage...");
-    
-    try {
-      const browserAPI = getBrowserAPI();
-      browserAPI.storage.local.get(null, (items) => {
-        console.log("[DEBUG] Direct storage access result:", items);
-        
-        if (items && Object.keys(items).length > 0) {
-          // Show raw storage data
-          let storageInfo = document.createElement('div');
-          storageInfo.className = 'storage-debug-info';
-          storageInfo.style.marginTop = '20px';
-          storageInfo.style.padding = '10px';
-          storageInfo.style.backgroundColor = '#f5f5f5';
-          storageInfo.style.borderRadius = '4px';
-          storageInfo.style.maxHeight = '300px';
-          storageInfo.style.overflow = 'auto';
-          storageInfo.style.textAlign = 'left';
-          
-          storageInfo.innerHTML = `
-            <h3 style="font-size:14px;margin-bottom:10px;">Raw Storage Data:</h3>
-            <pre style="font-size:11px;white-space:pre-wrap;word-break:break-all;">${JSON.stringify(items, null, 2)}</pre>
-          `;
-          
-          // Find PR info entries
-          const prInfoEntries = Object.keys(items).filter(k => k.startsWith('pr-info-'));
-          console.log("[DEBUG] PR info entries:", prInfoEntries);
-          
-          if (prInfoEntries.length > 0) {
-            // Try to manually create PR items
-            const manualPrs = prInfoEntries.map(key => {
-              const prId = key.substring(8); // Remove 'pr-info-' prefix
-              const stats = items[prId] || { reviewCount: 0, approvalCount: 0 };
-              return {
-                ...items[key],
-                id: prId,
-                prNumber: items[key].prNumber || prId.replace('pr-', ''),
-                viewCount: stats.reviewCount || 0,
-                approvalCount: stats.approvalCount || 0
-              };
-            }).filter(p => p && p.title); // Only keep valid PRs
-            
-            console.log("[DEBUG] Manually created PR list:", manualPrs);
-            
-            if (manualPrs.length > 0) {
-              // Show option to use manually created list
-              const useManualBtn = document.createElement('button');
-              useManualBtn.textContent = 'Use Available Data';
-              useManualBtn.style.marginTop = '10px';
-              useManualBtn.style.padding = '8px 15px';
-              useManualBtn.style.backgroundColor = 'var(--success-green)';
-              useManualBtn.style.color = 'white';
-              useManualBtn.style.border = 'none';
-              useManualBtn.style.borderRadius = '4px';
-              useManualBtn.style.cursor = 'pointer';
-              
-              useManualBtn.addEventListener('click', () => {
-                // Update state with manual data
-                state.prs = manualPrs;
-                state.loading = false;
-                renderFilteredPRs();
-              });
-              
-              storageInfo.appendChild(useManualBtn);
-            } else {
-              // Option to create a test PR
-              const createTestBtn = document.createElement('button');
-              createTestBtn.textContent = 'Create Test PR';
-              createTestBtn.style.marginTop = '10px';
-              createTestBtn.style.padding = '8px 15px';
-              createTestBtn.style.backgroundColor = 'var(--primary-blue)';
-              createTestBtn.style.color = 'white';
-              createTestBtn.style.border = 'none';
-              createTestBtn.style.borderRadius = '4px';
-              createTestBtn.style.cursor = 'pointer';
-              
-              createTestBtn.addEventListener('click', function() {
-                const testPR = {
-                  title: 'Test Pull Request',
-                  project: 'test-project',
-                  repo: 'test-repo',
-                  displayProject: 'Test Project',
-                  displayRepo: 'Test Repo',
-                  url: 'https://bitbucket.org/test-project/test-repo/pull-requests/123',
-                  status: 'open',
-                  isApprovedByMe: false,
-                  lastVisited: Date.now(),
-                  viewCount: 1,
-                  approvalCount: 0
-                };
-                
-                browserAPI.storage.local.set({
-                  'pr-123': { reviewCount: 1, approvalCount: 0, lastReviewed: Date.now() },
-                  'pr-info-pr-123': testPR
-                }, () => {
-                  alert('Test PR created! Reload the popup to see it.');
-                });
-              });
-              
-              storageInfo.appendChild(createTestBtn);
-            }
-          } else {
-            // No PR entries found, offer to create test data
-            const createTestBtn = document.createElement('button');
-            createTestBtn.textContent = 'Create Test PR';
-            createTestBtn.style.marginTop = '10px';
-            createTestBtn.style.padding = '8px 15px';
-            createTestBtn.style.backgroundColor = 'var(--primary-blue)';
-            createTestBtn.style.color = 'white';
-            createTestBtn.style.border = 'none';
-            createTestBtn.style.borderRadius = '4px';
-            createTestBtn.style.cursor = 'pointer';
-            
-            createTestBtn.addEventListener('click', function() {
-              const testPR = {
-                title: 'Test Pull Request',
-                project: 'test-project',
-                repo: 'test-repo',
-                displayProject: 'Test Project',
-                displayRepo: 'Test Repo',
-                url: 'https://bitbucket.org/test-project/test-repo/pull-requests/123',
-                status: 'open',
-                isApprovedByMe: false,
-                lastVisited: Date.now()
-              };
-              
-              browserAPI.storage.local.set({
-                'pr-123': { reviewCount: 1, approvalCount: 0, lastReviewed: Date.now() },
-                'pr-info-pr-123': testPR
-              }, () => {
-                alert('Test PR created! Reload the popup to see it.');
-              });
-            });
-            
-            storageInfo.appendChild(createTestBtn);
-          }
-          
-          // Get the PR list or empty state container
-          const container = document.querySelector('.empty-state') || document.getElementById('pr-list');
-          if (container) {
-            container.appendChild(storageInfo);
-          }
-        } else {
-          console.log("[DEBUG] No data found in storage");
-          alert("No data found in storage. Want to create a test PR?");
-          
-          // Create test PR option
-          const testPR = {
-            title: 'Test Pull Request',
-            project: 'test-project',
-            repo: 'test-repo',
-            displayProject: 'Test Project',
-            displayRepo: 'Test Repo',
-            url: 'https://bitbucket.org/test-project/test-repo/pull-requests/123',
-            status: 'open',
-            isApprovedByMe: false,
-            lastVisited: Date.now()
-          };
-          
-          if (confirm("Create a test PR for debugging?")) {
-            browserAPI.storage.local.set({
-              'pr-123': { reviewCount: 1, approvalCount: 0, lastReviewed: Date.now() },
-              'pr-info-pr-123': testPR
-            }, () => {
-              alert('Test PR created! Reload the popup to see it.');
-            });
-          }
-        }
-      });
-    } catch (err) {
-      console.error("[DEBUG] Error accessing storage directly:", err);
-      alert("Error accessing storage: " + err.message);
     }
   }
   
